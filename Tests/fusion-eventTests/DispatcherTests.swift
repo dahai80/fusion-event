@@ -23,7 +23,7 @@ final class DispatcherTests: XCTestCase {
     private func makeDispatcher(bucketMax: Int = 5, sockPath: String? = nil) -> Dispatcher {
         let eventLog = EventLog(logPath: tmpDir + "event.log")
         let path = sockPath ?? "/tmp/fe-nonexistent-\(UUID().uuidString).sock"
-        return Dispatcher(sockPath: path, timeoutSec: 1, tokenBucketMax: bucketMax, eventLog: eventLog)
+        return Dispatcher(sockPath: path, timeoutSec: 1, tokenBucketMax: bucketMax, queueMax: 512, eventLog: eventLog, outboxDir: tmpDir + "outbox")
     }
 
     private func startMockStudio() throws -> String {
@@ -69,10 +69,11 @@ final class DispatcherTests: XCTestCase {
     func testStatsShape() async {
         let dispatcher = makeDispatcher()
         let stats = await dispatcher.stats()
-        XCTAssertEqual(stats.count, 4)
+        XCTAssertEqual(stats.count, 5)
         XCTAssertNotNil(stats["submitted"])
         XCTAssertNotNil(stats["blocked"])
         XCTAssertNotNil(stats["failed"])
         XCTAssertNotNil(stats["dropped"])
+        XCTAssertNotNil(stats["retried"])
     }
 }

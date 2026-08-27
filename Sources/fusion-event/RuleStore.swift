@@ -4,23 +4,30 @@ import SQLite3
 private let SQLITE_TRANSIENT = unsafeBitCast(Int(-1), to: sqlite3_destructor_type.self)
 
 actor RuleStore {
-    nonisolated(unsafe) private var db: OpaquePointer?
+    private var db: OpaquePointer?
+    private nonisolated(unsafe) var closeHandle: OpaquePointer?
     private let dbPath: String
     private let nodeId: String
+    private var checkpointTask: Task<Void, Never>?
+    private let checkpointIntervalSec: Int
 
-    init(dbPath: String, nodeId: String) {
+    init(dbPath: String, nodeId: String, checkpointIntervalSec: Int = 300) {
         self.dbPath = dbPath
         self.nodeId = nodeId
+        self.checkpointIntervalSec = checkpointIntervalSec
         let dir = (dbPath as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         var handle: OpaquePointer? = nil
-        if sqlite3_open_v2(dbPath, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) != SQLITE_OK {
-            let msg = handle.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+        let openRc = sqlite3_open_v2(dbPath, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil)
+        if openRc != SQLITE_OK || handle == nil {
+            let msg = handle.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "open rc=\(openRc)"
             FusionLog.persist.error("rulestore open fail \(msg, privacy: .public)")
-            self.db = handle
+            if handle != nil { sqlite3_close(handle) }
+            self.db = nil
             return
         }
         self.db = handle
+        self.closeHandle = handle
         sqlite3_exec(handle, "PRAGMA journal_mode=WAL;", nil, nil, nil)
         sqlite3_exec(handle, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
         let ddl = """
@@ -52,11 +59,79 @@ actor RuleStore {
         } else {
             FusionLog.persist.info("rulestore ready \(dbPath, privacy: .public)")
         }
-        sqlite3_exec(handle, "ALTER TABLE rules ADD COLUMN throttle_max_per_window INTEGER DEFAULT 1;", nil, nil, nil)
+        runMigrations(handle: handle)
+        startCheckpoint()
+    }
+
+    private nonisolated func runMigrations(handle: OpaquePointer?) {
+        guard let handle else { return }
+        var currentVersion: Int32 = 0
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(handle, "PRAGMA user_version;", -1, &stmt, nil) == SQLITE_OK {
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                currentVersion = sqlite3_column_int(stmt, 0)
+            }
+            sqlite3_finalize(stmt)
+        }
+        struct Migration {
+            let version: Int32
+            let sql: String
+        }
+        let migrations: [Migration] = [
+            Migration(version: 1, sql: "ALTER TABLE rules ADD COLUMN throttle_max_per_window INTEGER DEFAULT 1;")
+        ]
+        var applied: Int32 = currentVersion
+        for m in migrations {
+            guard m.version > applied else { continue }
+            let rc = sqlite3_exec(handle, m.sql, nil, nil, nil)
+            if rc == SQLITE_OK {
+                applied = m.version
+                let setVer = "PRAGMA user_version = \(m.version);"
+                sqlite3_exec(handle, setVer, nil, nil, nil)
+                FusionLog.persist.info("rulestore migration v\(m.version) applied (E3: versioned, no try? masking)")
+            } else {
+                let msg = String(cString: sqlite3_errmsg(handle))
+                FusionLog.persist.error("rulestore migration v\(m.version) FAIL \(msg, privacy: .public) — abort further migrations (E3: fail visibly)")
+                break
+            }
+        }
+        if applied != currentVersion {
+            FusionLog.persist.info("rulestore schema at v\(applied)")
+        }
+    }
+
+    private nonisolated func startCheckpoint() {
+        guard checkpointIntervalSec > 0 else { return }
+        let interval = UInt64(checkpointIntervalSec) * 1_000_000_000
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: interval)
+                if Task.isCancelled { break }
+                await self?.checkpoint()
+            }
+        }
+        FusionLog.persist.info("rulestore wal checkpoint every \(self.checkpointIntervalSec)s (R5)")
+    }
+
+    private func checkpoint() {
+        guard let db else { return }
+        var errMsg: UnsafeMutablePointer<CChar>?
+        let rc = sqlite3_exec(db, "PRAGMA wal_checkpoint(TRUNCATE);", nil, nil, &errMsg)
+        if rc != SQLITE_OK {
+            let msg = errMsg.map { String(cString: $0) } ?? "rc=\(rc)"
+            FusionLog.persist.error("rulestore wal_checkpoint fail \(msg, privacy: .public)")
+        }
+        if errMsg != nil { sqlite3_free(errMsg) }
+    }
+
+    func stopCheckpoint() {
+        checkpointTask?.cancel()
+        checkpointTask = nil
     }
 
     deinit {
-        if db != nil { sqlite3_close(db) }
+        checkpointTask?.cancel()
+        if let h = closeHandle { sqlite3_close(h) }
     }
 
     func loadAll() -> [EventRule] {

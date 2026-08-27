@@ -48,7 +48,20 @@ public actor NSWorkspaceSource: EventSource {
                 await self?.bus?.publish(ev)
             }
         }
-        FusionLog.source.info("nsworkspace source start")
+        mountObserver = nc.addObserver(forName: NSNotification.Name("NSWorkspaceDidMountNotification"), object: nil, queue: nil) { [weak self] note in
+            let volumePath = (note.userInfo?["NSDevicePath"] as? String)
+                ?? (note.userInfo?["NSVolumePath"] as? String)
+            let now = UInt64(Date().timeIntervalSince1970 * 1000)
+            let ev = RawEvent(
+                sourceType: .fileModified, targetPath: volumePath, timestamp: now,
+                payload: ["mount": "1"], rawFlags: 0
+            )
+            Task {
+                await self?.registry.tickCount(.fileModified)
+                await self?.bus?.publish(ev)
+            }
+        }
+        FusionLog.source.info("nsworkspace source start (R8: mount observer registered)")
     }
 
     struct ProcessSnap: Sendable {

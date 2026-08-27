@@ -7,13 +7,15 @@ actor Lifecycle {
     private let ipc: IPCServer
     private let bus: EventBus
     private let dispatcher: Dispatcher
+    private let shutdownTimeoutSec: Int
     private var esXpcServer: ESXPCServer?
 
-    init(registry: SourceRegistry, ipc: IPCServer, bus: EventBus, dispatcher: Dispatcher) {
+    init(registry: SourceRegistry, ipc: IPCServer, bus: EventBus, dispatcher: Dispatcher, shutdownTimeoutSec: Int = 10) {
         self.registry = registry
         self.ipc = ipc
         self.bus = bus
         self.dispatcher = dispatcher
+        self.shutdownTimeoutSec = shutdownTimeoutSec
     }
 
     func trackESXPC(_ server: ESXPCServer) {
@@ -25,9 +27,9 @@ actor Lifecycle {
     func gracefulShutdown() async {
         guard !shuttingDown else { return }
         shuttingDown = true
-        FusionLog.lifecycle.info("graceful shutdown start")
+        FusionLog.lifecycle.info("graceful shutdown start (timeout=\(self.shutdownTimeoutSec)s, R10)")
         await bus.shutdown()
-        await dispatcher.drainForShutdown()
+        await dispatcher.drainForShutdown(timeoutSec: shutdownTimeoutSec)
         await registry.stopAll()
         await esXpcServer?.stop()
         await ipc.stop()

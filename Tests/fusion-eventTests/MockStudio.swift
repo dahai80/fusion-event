@@ -42,22 +42,23 @@ final class MockStudio: @unchecked Sendable {
     private nonisolated func handleConn(fd: Int32) {
         var nosig: Int32 = 1
         _ = Darwin.setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosig, socklen_t(MemoryLayout<Int32>.size))
-        var buf = Data()
         var byte: [UInt8] = [0]
         while true {
-            let n = Darwin.recv(fd, &byte, 1, 0)
-            if n <= 0 { break }
-            if byte[0] == 0x0A { break }
-            buf.append(byte[0])
+            var buf = Data()
+            var gotLine = false
+            while !gotLine {
+                let n = Darwin.recv(fd, &byte, 1, 0)
+                if n <= 0 { Darwin.close(fd); return }
+                if byte[0] == 0x0A { gotLine = true } else { buf.append(byte[0]) }
+            }
+            let idStr = extractId(buf)
+            let resp = #"{"jsonrpc":"2.0","id":\#(idStr),"result":{"task":{"task_id":"t1"}}}"#
+            let respData = (resp + "\n").data(using: .utf8) ?? Data()
+            _ = respData.withUnsafeBytes { b -> Int in
+                guard let base = b.baseAddress else { return -1 }
+                return Darwin.send(fd, base, respData.count, 0)
+            }
         }
-        let idStr = extractId(buf)
-        let resp = #"{"jsonrpc":"2.0","id":\#(idStr),"result":{"task":{"task_id":"t1"}}}"#
-        let respData = (resp + "\n").data(using: .utf8) ?? Data()
-        _ = respData.withUnsafeBytes { b -> Int in
-            guard let base = b.baseAddress else { return -1 }
-            return Darwin.send(fd, base, respData.count, 0)
-        }
-        Darwin.close(fd)
     }
 
     private nonisolated func extractId(_ data: Data) -> String {

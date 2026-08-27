@@ -7,23 +7,24 @@ public actor PasteboardSource: EventSource {
     private let registry: SourceRegistry
     private var lastCount: Int = 0
     private var timer: Task<Void, Never>?
-    private let intervalSec: UInt64 = 2
+    private let intervalSec: UInt64
 
-    public init(bus: EventBus, registry: SourceRegistry) {
+    public init(bus: EventBus, registry: SourceRegistry, intervalSec: Int = 1) {
         self.bus = bus
         self.registry = registry
+        self.intervalSec = UInt64(max(intervalSec, 1))
     }
 
     public func start() async {
         lastCount = NSPasteboard.general.changeCount
         timer = Task { [weak self] in
             while !Task.isCancelled {
-                let ns = (self?.intervalSec ?? 2) * 1_000_000_000
+                let ns = (self?.intervalSec ?? 1) * 1_000_000_000
                 try? await Task.sleep(nanoseconds: ns)
                 await self?.poll()
             }
         }
-        FusionLog.source.info("pasteboard source start (E3: SLA >1-2s, excluded from <100ms)")
+        FusionLog.source.info("pasteboard source start poll=\(self.intervalSec)s changeCount-based (E8: configurable, faster rapid-change detection)")
     }
 
     public func stop() async {

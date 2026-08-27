@@ -7,11 +7,48 @@ public actor ContextBridge {
     private let ttlSec: Int
     private var client: UDSClient?
     private var cache: [String: (context: ContextResult, expiryTs: UInt64)] = [:]
+    private var cacheOrder: [String] = []
+    private let cacheMaxEntries: Int
 
-    public init(sockPath: String, timeoutSec: Int, ttlSec: Int) {
+    public init(sockPath: String, timeoutSec: Int, ttlSec: Int, cacheMaxEntries: Int = 5000) {
         self.sockPath = sockPath
         self.timeoutSec = timeoutSec
         self.ttlSec = ttlSec
+        self.cacheMaxEntries = cacheMaxEntries
+        startPurgeLoop()
+    }
+
+    private nonisolated func startPurgeLoop() {
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+                if Task.isCancelled { break }
+                await self?.purgeExpired(now: UInt64(Date().timeIntervalSince1970 * 1000))
+            }
+        }
+        FusionLog.bridge.info("context cache bounded LRU ttl purge=60s (A4: no unbounded growth)")
+    }
+
+    private func putCache(_ bucket: String, _ cr: ContextResult, now: UInt64) {
+        if cache[bucket] == nil { cacheOrder.append(bucket) }
+        cache[bucket] = (cr, now + UInt64(ttlSec) * 1000)
+        if cache.count > cacheMaxEntries {
+            let evict = cacheOrder.removeFirst()
+            cache.removeValue(forKey: evict)
+        }
+    }
+
+    private func purgeExpired(now: UInt64) {
+        var expired: [String] = []
+        for (k, v) in cache where v.expiryTs <= now {
+            expired.append(k)
+        }
+        guard !expired.isEmpty else { return }
+        for k in expired {
+            cache.removeValue(forKey: k)
+            cacheOrder.removeAll { $0 == k }
+        }
+        FusionLog.bridge.info("context cache purged \(expired.count) expired (A4), remaining \(self.cache.count)")
     }
 
     public func retrieveContext(signal: TriggerSignal) async -> ContextResult {
@@ -42,7 +79,7 @@ public actor ContextBridge {
             let ids = (result["memory_ids"] as? [String]) ?? []
             let hit = result["cache_hit"] as? Bool ?? false
             let cr = ContextResult(context: ctx, memoryIds: ids, cacheHit: hit, contextStale: false)
-            cache[bucket] = (cr, now + UInt64(ttlSec) * 1000)
+            putCache(bucket, cr, now: now)
             return cr
         } catch let err as UDSClientError {
             await resetClientOnError(err)

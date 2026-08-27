@@ -12,6 +12,7 @@ public actor RuleEngine {
     private var dispatchStreamId: UUID?
     private var droppedCount: UInt64 = 0
     private var pendingDispatch: Int = 0
+    private var monotonicHighWater: UInt64 = 0
     private var dbWriteQueue: [(ruleName: String, lastFireTs: UInt64)] = []
     private var dbWriteTask: Task<Void, Never>?
     private let dbBatchSize: Int = 64
@@ -119,13 +120,21 @@ public actor RuleEngine {
         let matched = match(event)
         guard !matched.isEmpty else { return }
         let now = event.timestamp
+        if now > monotonicHighWater {
+            monotonicHighWater = now
+        } else if now < monotonicHighWater {
+            let clamped = monotonicHighWater + 1
+            monotonicHighWater = clamped
+            FusionLog.rule.notice("clock rollback detected wall=\(now) < hwm=\(self.monotonicHighWater - 1), clamped to \(clamped) (A6/R3: monotonic dedup guard)")
+        }
+        let monotonicNow = monotonicHighWater
         for rule in matched {
             if !rule.enabled { continue }
-            if !checkDebounce(rule: rule, now: now) { continue }
-            if !checkThrottle(rule: rule, now: now) { continue }
-            updateDebounce(rule: rule, now: now)
-            dbWriteQueue.append((rule.ruleName, now))
-            let signal = Normalizer.normalize(event: event, rule: rule, nodeId: nodeId)
+            if !checkDebounce(rule: rule, now: monotonicNow) { continue }
+            if !checkThrottle(rule: rule, now: monotonicNow) { continue }
+            updateDebounce(rule: rule, now: monotonicNow)
+            dbWriteQueue.append((rule.ruleName, monotonicNow))
+            let signal = Normalizer.normalize(event: event, rule: rule, nodeId: nodeId, dedupTs: monotonicNow)
             FusionLog.rule.info("rule hit \(rule.ruleName, privacy: .public) trigger=\(signal.triggerId, privacy: .public) idem=\(signal.idempotencyKey, privacy: .public)")
             guard let cont = dispatchStream else {
                 droppedCount += 1

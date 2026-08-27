@@ -68,34 +68,51 @@ actor EventLog {
 
     func replay(sinceTs: UInt64, limit: Int) -> [LoggedEvent] {
         var out: [LoggedEvent] = []
-        guard let fh = try? FileHandle(forReadingFrom: URL(fileURLWithPath: logPath)) else { return out }
         let dec = JSONDecoder()
-        var pending = Data()
-        let chunkSize = 8192
         var collected: [LoggedEvent] = []
-        while true {
-            let chunk = fh.readData(ofLength: chunkSize)
-            if chunk.isEmpty {
-                if !pending.isEmpty, let entry = try? dec.decode(LoggedEvent.self, from: pending) {
+        let chunkSize = 8192
+        let files = readableLogFiles()
+        for f in files {
+            guard let fh = try? FileHandle(forReadingFrom: URL(fileURLWithPath: f)) else {
+                FusionLog.persist.error("eventlog replay open fail \(f, privacy: .public) (R9: no silent empty)")
+                continue
+            }
+            var pending = Data()
+            while true {
+                let chunk = fh.readData(ofLength: chunkSize)
+                if chunk.isEmpty {
+                    if !pending.isEmpty, let entry = try? dec.decode(LoggedEvent.self, from: pending) {
+                        if entry.event.timestamp >= sinceTs { collected.append(entry) }
+                    }
+                    break
+                }
+                pending.append(chunk)
+                while let nl = pending.firstIndex(of: 0x0A) {
+                    let line = pending.subdata(in: 0..<nl)
+                    pending.removeSubrange(0...nl)
+                    guard !line.isEmpty, let entry = try? dec.decode(LoggedEvent.self, from: line) else { continue }
                     if entry.event.timestamp >= sinceTs { collected.append(entry) }
                 }
-                break
             }
-            pending.append(chunk)
-            while let nl = pending.firstIndex(of: 0x0A) {
-                let line = pending.subdata(in: 0..<nl)
-                pending.removeSubrange(0...nl)
-                guard !line.isEmpty, let entry = try? dec.decode(LoggedEvent.self, from: line) else { continue }
-                if entry.event.timestamp >= sinceTs { collected.append(entry) }
-            }
+            try? fh.close()
         }
-        try? fh.close()
         for entry in collected.reversed() {
             out.append(entry)
             if out.count >= limit { break }
         }
         out.reverse()
         return out
+    }
+
+    private func readableLogFiles() -> [String] {
+        var files = [logPath]
+        for i in 1...maxArchives {
+            let archived = "\(logPath).\(i)"
+            if FileManager.default.fileExists(atPath: archived) {
+                files.append(archived)
+            }
+        }
+        return files
     }
 
     func recentDebounceWindow(withinSec: UInt64) -> [String: UInt64] {

@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 
 public enum Normalizer {
-    public static func normalize(event: RawEvent, rule: EventRule, nodeId: String) -> TriggerSignal {
+    public static func normalize(event: RawEvent, rule: EventRule, nodeId: String, dedupTs: UInt64? = nil) -> TriggerSignal {
         let triggerId = UUID().uuidString
         let eventId = UUID().uuidString
         let systemEvent = SystemEvent(
@@ -13,7 +13,8 @@ public enum Normalizer {
             payload: event.payload,
             nodeId: nodeId
         )
-        let bucket = idempotencyBucket(timestamp: event.timestamp, debounceMs: rule.debounceMs)
+        let tsForBucket = dedupTs ?? event.timestamp
+        let bucket = idempotencyBucket(timestamp: tsForBucket, debounceMs: rule.debounceMs)
         let idempotencyKey = computeIdempotencyKey(
             ruleName: rule.ruleName,
             eventType: event.sourceType,

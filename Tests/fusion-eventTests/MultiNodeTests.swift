@@ -35,12 +35,13 @@ final class MultiNodeTests: XCTestCase {
         let engine = RuleEngine(store: store, nodeId: nodeId)
         await engine.loadFromStore()
         let eventLog = EventLog(logPath: tmpDir + "mn-\(nodeId).log")
-        let dispatcher = Dispatcher(sockPath: studioSock, timeoutSec: 1, tokenBucketMax: bucketMax, eventLog: eventLog)
+        let dispatcher = Dispatcher(sockPath: studioSock, timeoutSec: 1, tokenBucketMax: bucketMax, queueMax: 512, eventLog: eventLog, outboxDir: tmpDir + "outbox-\(nodeId)")
         let audit = AuditBridge(sockPath: tmpDir + "guard-\(nodeId).sock", timeoutSec: 1)
         let ctx = ContextBridge(sockPath: tmpDir + "memory-\(nodeId).sock", timeoutSec: 1, ttlSec: 60)
         await dispatcher.setBridges(audit: audit, context: ctx)
         let capture = CaptureSink()
         let bus = EventBus(ruleEngine: engine)
+        await bus.start()
         return (bus, engine, dispatcher, capture)
     }
 
@@ -61,6 +62,7 @@ final class MultiNodeTests: XCTestCase {
         await engine.setSink(capture)
         _ = await engine.addRule(makeRule())
         await bus.publish(RawEvent(sourceType: .fileModified, targetPath: "/src/a.swift", timestamp: 1000, payload: [:], rawFlags: 0))
+        await bus.drainIngest()
         await engine.flush()
         XCTAssertEqual(capture.signals.count, 1)
         XCTAssertEqual(capture.signals.first?.nodeId, "node-A", "node_id must propagate event->signal (H2)")
@@ -76,6 +78,8 @@ final class MultiNodeTests: XCTestCase {
         _ = await engineB.addRule(makeRule())
         await busA.publish(RawEvent(sourceType: .fileModified, targetPath: "/src/a.swift", timestamp: 1000, payload: [:], rawFlags: 0))
         await busB.publish(RawEvent(sourceType: .fileModified, targetPath: "/src/b.swift", timestamp: 1000, payload: [:], rawFlags: 0))
+        await busA.drainIngest()
+        await busB.drainIngest()
         await engineA.flush()
         await engineB.flush()
         XCTAssertEqual(captureA.signals.first?.nodeId, "node-A")
@@ -87,7 +91,7 @@ final class MultiNodeTests: XCTestCase {
         let localSock = "/tmp/fe-local-\(UUID().uuidString).sock"
         let (_, _, dispatcher, _) = await makeChain(nodeId: "node-A", studioSock: localSock)
         let stats = await dispatcher.stats()
-        XCTAssertEqual(stats.count, 4)
+        XCTAssertEqual(stats.count, 5)
         XCTAssertTrue(localSock.hasPrefix("/tmp/"), "trigger chain must target local UDS, never cross-node TCP (H2/D-8)")
     }
 
@@ -106,6 +110,7 @@ final class MultiNodeTests: XCTestCase {
                 rawFlags: 0
             ))
         }
+        await bus.drainIngest()
         await engine.flush()
         let stats = await dispatcher.stats()
         let processed = stats["submitted"]! + stats["failed"]! + stats["blocked"]!
@@ -129,6 +134,7 @@ final class MultiNodeTests: XCTestCase {
                 rawFlags: 0
             ))
         }
+        await bus.drainIngest()
         await engine.flush()
         let stats = await dispatcher.stats()
         let processed = stats["submitted"]! + stats["failed"]!
@@ -150,6 +156,7 @@ final class MultiNodeTests: XCTestCase {
                 rawFlags: 0
             ))
         }
+        await bus.drainIngest()
         await engine.flush()
         let stats = await dispatcher.stats()
         let processed = stats["submitted"]! + stats["failed"]! + stats["blocked"]!

@@ -71,7 +71,6 @@ final class ESXPCHandler: NSObject, ESXPCProtocol, @unchecked Sendable {
         FusionLog.source.info("es-xpc deliver pid=\(snap.pid) action=\(snap.action, privacy: .public)")
         Task { [weak bus, weak registry] in
             guard let bus, let registry else { return }
-            await registry.tickCount(.processTerminated)
             await bus.publish(RawEvent(
                 sourceType: .processTerminated,
                 targetPath: snap.execPath,
@@ -83,6 +82,7 @@ final class ESXPCHandler: NSObject, ESXPCProtocol, @unchecked Sendable {
                 ],
                 rawFlags: 0
             ))
+            await registry.tickCount(.processTerminated)
         }
     }
 }

@@ -44,6 +44,28 @@ public actor SourceRegistry {
         }
     }
 
+    public func tickCountN(_ type: SystemEventType, n: UInt64, isError: Bool = false) {
+        if isError {
+            errors[type.rawValue, default: 0] += n
+        } else {
+            counts[type.rawValue, default: 0] += n
+        }
+    }
+
+    public func waitForCount(_ type: SystemEventType, target: UInt64, timeoutMs: Int = 2000) async {
+        let deadline = UInt64(timeoutMs) * 1_000_000
+        var elapsed: UInt64 = 0
+        while counts[type.rawValue, default: 0] < target {
+            if elapsed >= deadline {
+                let actual = counts[type.rawValue, default: 0]
+                FusionLog.source.error("registry waitForCount timeout type=\(type.rawValue, privacy: .public) target=\(target) actual=\(actual)")
+                return
+            }
+            try? await Task.sleep(nanoseconds: 500_000)
+            elapsed += 500_000
+        }
+    }
+
     public func health() -> [String: [String: AnyCodable]] {
         var out: [String: [String: AnyCodable]] = [:]
         for s in sources {

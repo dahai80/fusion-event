@@ -85,22 +85,37 @@ actor UDSClient {
     private func readLine() throws -> Data {
         var buf = Data()
         buf.reserveCapacity(512)
-        var byte: [UInt8] = [0]
+        let chunk = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
+        defer { chunk.deallocate() }
         while true {
-            let n = Darwin.recv(fd, &byte, 1, 0)
+            let n = Darwin.recv(fd, chunk, 4096, 0)
             if n <= 0 {
                 if n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK) {
                     throw UDSClientError.timeout
                 }
                 throw UDSClientError.ioError("recv fail errno=\(errno)")
             }
-            if byte[0] == 0x0A { break }
-            buf.append(byte[0])
+            let got = UnsafeBufferPointer(start: chunk, count: n)
+            var foundNewline = false
+            for i in 0..<n {
+                if got[i] == 0x0A {
+                    let prefix = UnsafeBufferPointer(start: chunk, count: i)
+                    buf.append(prefix)
+                    foundNewline = true
+                    break
+                }
+            }
+            if foundNewline {
+                if buf.count > 1_048_576 {
+                    throw UDSClientError.ioError("response too large >1MB")
+                }
+                return buf
+            }
+            buf.append(UnsafeBufferPointer(start: chunk, count: n))
             if buf.count > 1_048_576 {
                 throw UDSClientError.ioError("response too large >1MB")
             }
         }
-        return buf
     }
 
     private func poison(_ reason: String) {

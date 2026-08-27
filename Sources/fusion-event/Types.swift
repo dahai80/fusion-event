@@ -96,7 +96,7 @@ public struct EventRule: Codable, Sendable, Equatable {
     }
 }
 
-public struct TriggerSignal: Sendable {
+public struct TriggerSignal: Sendable, Codable {
     public let event: SystemEvent
     public let rule: EventRule
     public let triggerId: String
