@@ -134,7 +134,34 @@ enum RPCCodec {
 
     static func decodeRequest(_ data: Data) -> RPCRequest? {
         let dec = JSONDecoder()
-        return try? dec.decode(RPCRequest.self, from: data)
+        do {
+            return try dec.decode(RPCRequest.self, from: data)
+        } catch {
+            FusionLog.ipc.error("rpc decodeRequest fail: \(error.localizedDescription, privacy: .public) bytes=\(data.count) (F-16: no silent swallow)")
+            return nil
+        }
+    }
+
+    enum RPCBatch {
+        case single(RPCRequest)
+        case batch([RPCRequest])
+        case malformed
+    }
+
+    static func decodeBatch(_ data: Data) -> RPCBatch {
+        let dec = JSONDecoder()
+        do {
+            if data.first == 0x5B {
+                let arr = try dec.decode([RPCRequest].self, from: data)
+                guard !arr.isEmpty else { return .malformed }
+                return .batch(arr)
+            }
+            let req = try dec.decode(RPCRequest.self, from: data)
+            return .single(req)
+        } catch {
+            FusionLog.ipc.error("rpc decodeBatch fail: \(error.localizedDescription, privacy: .public) bytes=\(data.count) (F-16)")
+            return .malformed
+        }
     }
 
     static func decodeAny(_ data: Data) -> AnyCodable? {

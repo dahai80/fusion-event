@@ -7,6 +7,7 @@ public actor NSWorkspaceSource: EventSource {
     private let registry: SourceRegistry
     private var observers: [NSObjectProtocol] = []
     private var wakeObserver: NSObjectProtocol?
+    private var sleepObserver: NSObjectProtocol?
     private var mountObserver: NSObjectProtocol?
 
     public init(bus: EventBus, registry: SourceRegistry) {
@@ -28,15 +29,39 @@ public actor NSWorkspaceSource: EventSource {
         wakeObserver = nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: nil) { [weak self] _ in
             let now = UInt64(Date().timeIntervalSince1970 * 1000)
             let ev = RawEvent(
-                sourceType: .networkStatusChanged, targetPath: nil, timestamp: now,
+                sourceType: .systemWake, targetPath: nil, timestamp: now,
                 payload: ["wake": "1"], rawFlags: 0
             )
             Task {
-                await self?.registry.tickCount(.networkStatusChanged)
+                await self?.registry.tickCount(.systemWake)
                 await self?.bus?.publish(ev)
             }
         }
-        FusionLog.source.info("nsworkspace source start")
+        sleepObserver = nc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: nil) { [weak self] _ in
+            let now = UInt64(Date().timeIntervalSince1970 * 1000)
+            let ev = RawEvent(
+                sourceType: .systemSleep, targetPath: nil, timestamp: now,
+                payload: ["sleep": "1"], rawFlags: 0
+            )
+            Task {
+                await self?.registry.tickCount(.systemSleep)
+                await self?.bus?.publish(ev)
+            }
+        }
+        mountObserver = nc.addObserver(forName: NSNotification.Name("NSWorkspaceDidMountNotification"), object: nil, queue: nil) { [weak self] note in
+            let volumePath = (note.userInfo?["NSDevicePath"] as? String)
+                ?? (note.userInfo?["NSVolumePath"] as? String)
+            let now = UInt64(Date().timeIntervalSince1970 * 1000)
+            let ev = RawEvent(
+                sourceType: .fileModified, targetPath: volumePath, timestamp: now,
+                payload: ["mount": "1"], rawFlags: 0
+            )
+            Task {
+                await self?.registry.tickCount(.fileModified)
+                await self?.bus?.publish(ev)
+            }
+        }
+        FusionLog.source.info("nsworkspace source start (R8: mount observer registered)")
     }
 
     struct ProcessSnap: Sendable {
@@ -62,9 +87,10 @@ public actor NSWorkspaceSource: EventSource {
     }
 
     private func publishProcess(_ snap: ProcessSnap) async {
-        await registry.tickCount(.processTerminated)
+        let et: SystemEventType = snap.isLaunch ? .processLaunched : .processTerminated
+        await registry.tickCount(et)
         await bus?.publish(RawEvent(
-            sourceType: .processTerminated,
+            sourceType: et,
             targetPath: snap.execPath,
             timestamp: snap.timestamp,
             payload: [
@@ -81,9 +107,11 @@ public actor NSWorkspaceSource: EventSource {
         let nc = NSWorkspace.shared.notificationCenter
         observers.forEach { nc.removeObserver($0) }
         if let w = wakeObserver { nc.removeObserver(w) }
+        if let s = sleepObserver { nc.removeObserver(s) }
         if let m = mountObserver { nc.removeObserver(m) }
         observers.removeAll()
         wakeObserver = nil
+        sleepObserver = nil
         mountObserver = nil
         FusionLog.source.info("nsworkspace source stop")
     }

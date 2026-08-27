@@ -7,11 +7,52 @@ public actor ContextBridge {
     private let ttlSec: Int
     private var client: UDSClient?
     private var cache: [String: (context: ContextResult, expiryTs: UInt64)] = [:]
+    private var cacheOrder: [String] = []
+    private let cacheMaxEntries: Int
 
-    public init(sockPath: String, timeoutSec: Int, ttlSec: Int) {
+    public init(sockPath: String, timeoutSec: Int, ttlSec: Int, cacheMaxEntries: Int = 5000) {
         self.sockPath = sockPath
         self.timeoutSec = timeoutSec
         self.ttlSec = ttlSec
+        self.cacheMaxEntries = cacheMaxEntries
+        startPurgeLoop()
+    }
+
+    private nonisolated func startPurgeLoop() {
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+                if Task.isCancelled { break }
+                await self?.purgeExpired(now: UInt64(Date().timeIntervalSince1970 * 1000))
+            }
+        }
+        FusionLog.bridge.info("context cache bounded LRU ttl purge=60s (A4: no unbounded growth)")
+    }
+
+    private func putCache(_ bucket: String, _ cr: ContextResult, now: UInt64) {
+        if cache[bucket] != nil {
+            cacheOrder.removeAll { $0 == bucket }
+        }
+        cacheOrder.append(bucket)
+        cache[bucket] = (cr, now + UInt64(ttlSec) * 1000)
+        if cache.count > cacheMaxEntries {
+            let evict = cacheOrder.removeFirst()
+            cache.removeValue(forKey: evict)
+        }
+    }
+
+    private func purgeExpired(now: UInt64) {
+        var expired: [String] = []
+        for (k, v) in cache where v.expiryTs <= now {
+            expired.append(k)
+        }
+        guard !expired.isEmpty else { return }
+        let expiredSet = Set(expired)
+        for k in expired {
+            cache.removeValue(forKey: k)
+        }
+        cacheOrder.removeAll { expiredSet.contains($0) }
+        FusionLog.bridge.info("context cache purged \(expired.count) expired (A4, F-EVICT-2: O(n) not O(n²)), remaining \(self.cache.count)")
     }
 
     public func retrieveContext(signal: TriggerSignal) async -> ContextResult {
@@ -20,6 +61,8 @@ public actor ContextBridge {
         let now = UInt64(Date().timeIntervalSince1970 * 1000)
         if let cached = cache[bucket], cached.expiryTs > now {
             FusionLog.bridge.debug("context cache hit \(bucket, privacy: .public)")
+            cacheOrder.removeAll { $0 == bucket }
+            cacheOrder.append(bucket)
             return cached.context
         }
         let params: [String: Any] = [
@@ -42,9 +85,10 @@ public actor ContextBridge {
             let ids = (result["memory_ids"] as? [String]) ?? []
             let hit = result["cache_hit"] as? Bool ?? false
             let cr = ContextResult(context: ctx, memoryIds: ids, cacheHit: hit, contextStale: false)
-            cache[bucket] = (cr, now + UInt64(ttlSec) * 1000)
+            putCache(bucket, cr, now: now)
             return cr
         } catch let err as UDSClientError {
+            await resetClientOnError(err)
             switch err {
             case .connectionFailed:
                 FusionLog.bridge.notice("memory not running -> fallback")
@@ -91,8 +135,15 @@ public actor ContextBridge {
 
     private func ensureClient() -> UDSClient {
         if let c = client { return c }
-        let c = UDSClient(sockPath: sockPath)
+        let c = UDSClient(sockPath: sockPath, timeoutSec: timeoutSec)
         client = c
         return c
+    }
+
+    private func resetClientOnError(_ err: UDSClientError) async {
+        guard client != nil else { return }
+        FusionLog.bridge.error("context reset client after \(err), discard poisoned connection")
+        await client?.close()
+        client = nil
     }
 }

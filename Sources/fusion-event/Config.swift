@@ -8,13 +8,19 @@ struct FusionEventConfig: Codable, Sendable {
     var dataDir: String
     var nodeId: String
     var contextCacheTtlSec: Int
+    var contextCacheMaxEntries: Int
     var heartbeatIntervalSec: Int
     var heartbeatDeadSec: Int
     var tokenBucketMax: Int
+    var dispatchQueueMax: Int
     var outboundTimeoutGuard: Int
     var outboundTimeoutMemory: Int
     var outboundTimeoutDispatch: Int
-    var fseventsRoot: String
+    var fseventsWatchPaths: [String]
+    var fseventsLatencySec: Double
+    var pasteboardPollSec: Int
+    var shutdownTimeoutSec: Int
+    var walCheckpointIntervalSec: Int
     var esEnabled: Bool
     var esXpcEnabled: Bool
 
@@ -24,15 +30,21 @@ struct FusionEventConfig: Codable, Sendable {
         memorySock: ProcessInfo.processInfo.environment["FUSION_MEMORY_SOCK"] ?? "/tmp/fusion-memory.sock",
         studioSock: ProcessInfo.processInfo.environment["FUSION_STUDIO_SOCK"] ?? "/tmp/fusion-studio.sock",
         dataDir: ProcessInfo.processInfo.environment["FUSION_EVENT_DATA"] ?? "\(NSHomeDirectory())/.fusion-event",
-        nodeId: ProcessInfo.processInfo.environment["FUSION_NODE_ID"] ?? Host.current().localizedName ?? "local-node",
+        nodeId: ProcessInfo.processInfo.environment["FUSION_NODE_ID"] ?? "auto",
         contextCacheTtlSec: 60,
+        contextCacheMaxEntries: 5000,
         heartbeatIntervalSec: 15,
         heartbeatDeadSec: 45,
-        tokenBucketMax: 5,
+        tokenBucketMax: 16,
+        dispatchQueueMax: 512,
         outboundTimeoutGuard: 2,
         outboundTimeoutMemory: 3,
         outboundTimeoutDispatch: 5,
-        fseventsRoot: NSHomeDirectory(),
+        fseventsWatchPaths: [],
+        fseventsLatencySec: 0.3,
+        pasteboardPollSec: 1,
+        shutdownTimeoutSec: 10,
+        walCheckpointIntervalSec: 300,
         esEnabled: ProcessInfo.processInfo.environment["FUSION_EVENT_ES_ENABLED"] == "1",
         esXpcEnabled: ProcessInfo.processInfo.environment["FUSION_EVENT_ES_XPC_ENABLED"] == "1"
     )
@@ -65,30 +77,36 @@ struct FusionEventConfig: Codable, Sendable {
                 let enc = JSONEncoder()
                 enc.outputFormatting = [.prettyPrinted, .sortedKeys]
                 let out = try enc.encode(cfg)
-                try out.write(to: URL(fileURLWithPath: path))
-                FusionLog.lifecycle.info("config written to \(path, privacy: .public)")
+                try out.write(to: URL(fileURLWithPath: path), options: [.atomic])
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+                FusionLog.lifecycle.info("config written to \(path, privacy: .public) mode=0600 (S1)")
             }
         } catch {
             FusionLog.lifecycle.error("config load fail \(error.localizedDescription, privacy: .public), use default")
         }
+        cfg.nodeId = resolveNodeId(dataDir: cfg.dataDir, declared: cfg.nodeId)
+        if cfg.fseventsWatchPaths.isEmpty {
+            FusionLog.lifecycle.notice("fsevents watch paths empty (A2/R1): file events disabled until rule.add path_pattern drives registration or watch_paths configured; avoid whole-home-dir flood")
+        }
         return cfg
     }
 
-    static func writeDefault(to dataDir: String) -> FusionEventConfig {
-        var cfg = FusionEventConfig.default
-        cfg.dataDir = dataDir
-        let path = "\(dataDir)/config.json"
-        do {
-            let fm = FileManager.default
-            try? fm.createDirectory(atPath: dataDir, withIntermediateDirectories: true)
-            let enc = JSONEncoder()
-            enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let out = try enc.encode(cfg)
-            try out.write(to: URL(fileURLWithPath: path))
-            FusionLog.lifecycle.info("config default written \(path, privacy: .public)")
-        } catch {
-            FusionLog.lifecycle.error("config write fail \(error.localizedDescription, privacy: .public)")
+    static func resolveNodeId(dataDir: String, declared: String) -> String {
+        if declared != "auto" && !declared.isEmpty {
+            return declared
         }
-        return cfg
+        let idPath = "\(dataDir)/node.id"
+        let fm = FileManager.default
+        try? fm.createDirectory(atPath: dataDir, withIntermediateDirectories: true)
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: idPath)),
+           let s = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !s.isEmpty {
+            return s
+        }
+        let newId = "node-" + UUID().uuidString.prefix(8)
+        try? newId.data(using: .utf8)?.write(to: URL(fileURLWithPath: idPath), options: [.atomic])
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: idPath)
+        FusionLog.lifecycle.info("nodeId generated and persisted \(newId, privacy: .public) at \(idPath, privacy: .public) mode=0600 (A2: stable unique identity, not hostname; S1)")
+        return String(newId)
     }
 }

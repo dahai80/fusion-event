@@ -8,6 +8,7 @@ enum LogCategory: String {
     case ipc
     case bridge
     case persist
+    case metrics
 }
 
 enum FusionLog {
@@ -23,4 +24,5 @@ enum FusionLog {
     static let ipc = Logger(subsystem: subsystem, category: LogCategory.ipc.rawValue)
     static let bridge = Logger(subsystem: subsystem, category: LogCategory.bridge.rawValue)
     static let persist = Logger(subsystem: subsystem, category: LogCategory.persist.rawValue)
+    static let metrics = Logger(subsystem: subsystem, category: LogCategory.metrics.rawValue)
 }

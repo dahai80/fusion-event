@@ -8,6 +8,14 @@ public actor RuleEngine {
     private weak var sink: TriggerSink?
     private let nodeId: String
     private var eventLog: EventLog?
+    private var dispatchStream: AsyncStream<TriggerSignal>.Continuation?
+    private var dispatchStreamId: UUID?
+    private var droppedCount: UInt64 = 0
+    private var pendingDispatch: Int = 0
+    private var monotonicHighWater: UInt64 = 0
+    private var dbWriteQueue: [(ruleName: String, lastFireTs: UInt64)] = []
+    private var dbWriteTask: Task<Void, Never>?
+    private let dbBatchSize: Int = 64
 
     init(store: RuleStore, nodeId: String) {
         self.store = store
@@ -16,10 +24,47 @@ public actor RuleEngine {
 
     public func setSink(_ sink: TriggerSink) {
         self.sink = sink
+        startDispatchLoop()
     }
 
     func setEventLog(_ log: EventLog) {
         self.eventLog = log
+    }
+
+    private func startDispatchLoop() {
+        let id = UUID()
+        let (stream, cont) = AsyncStream.makeStream(of: TriggerSignal.self, bufferingPolicy: .bufferingNewest(8192))
+        cont.onTermination = { [weak self] _ in
+            Task { await self?.clearDispatchStream() }
+        }
+        dispatchStream = cont
+        dispatchStreamId = id
+        let sinkRef = sink
+        Task { [weak self] in
+            for await signal in stream {
+                await sinkRef?.onTrigger(signal)
+                await self?.dispatchDrained()
+                await self?.maybeStartDbFlush()
+            }
+        }
+        FusionLog.rule.info("ruleengine dispatch loop start, backpressure buffer 8192 (F2)")
+    }
+
+    private func dispatchDrained() {
+        pendingDispatch = max(0, pendingDispatch - 1)
+    }
+
+    public func flush() async {
+        while pendingDispatch > 0 {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+    }
+
+    private func clearDispatchStream() {
+        if dispatchStreamId != nil {
+            dispatchStream = nil
+            dispatchStreamId = nil
+        }
     }
 
     public func loadFromStore() async {
@@ -75,17 +120,59 @@ public actor RuleEngine {
         let matched = match(event)
         guard !matched.isEmpty else { return }
         let now = event.timestamp
+        if now > monotonicHighWater {
+            monotonicHighWater = now
+        } else if now < monotonicHighWater {
+            let clamped = monotonicHighWater + 1
+            monotonicHighWater = clamped
+            FusionLog.rule.notice("clock rollback detected wall=\(now) < hwm=\(self.monotonicHighWater - 1), clamped to \(clamped) (A6/R3: monotonic dedup guard)")
+        }
+        let monotonicNow = monotonicHighWater
         for rule in matched {
             if !rule.enabled { continue }
-            if !checkDebounce(rule: rule, now: now) { continue }
-            if !checkThrottle(rule: rule, now: now) { continue }
-            updateDebounce(rule: rule, now: now)
-            await store.saveDebounceState(ruleName: rule.ruleName, lastFireTs: now)
-            let signal = Normalizer.normalize(event: event, rule: rule, nodeId: nodeId)
+            if !checkDebounce(rule: rule, now: monotonicNow) { continue }
+            if !checkThrottle(rule: rule, now: monotonicNow) { continue }
+            updateDebounce(rule: rule, now: monotonicNow)
+            dbWriteQueue.append((rule.ruleName, monotonicNow))
+            let signal = Normalizer.normalize(event: event, rule: rule, nodeId: nodeId, dedupTs: monotonicNow)
             FusionLog.rule.info("rule hit \(rule.ruleName, privacy: .public) trigger=\(signal.triggerId, privacy: .public) idem=\(signal.idempotencyKey, privacy: .public)")
-            await sink?.onTrigger(signal)
+            guard let cont = dispatchStream else {
+                droppedCount += 1
+                FusionLog.rule.error("dispatch stream nil, drop trigger=\(signal.triggerId, privacy: .public) (F2)")
+                continue
+            }
+            let yielded = cont.yield(signal)
+            switch yielded {
+            case .terminated:
+                droppedCount += 1
+                FusionLog.rule.error("dispatch stream terminated, drop trigger=\(signal.triggerId, privacy: .public) (F2)")
+            case .dropped:
+                droppedCount += 1
+                pendingDispatch = max(0, pendingDispatch - 1)
+                FusionLog.rule.error("dispatch queue full (backpressure), drop oldest trigger=\(signal.triggerId, privacy: .public) (F2)")
+            default:
+                pendingDispatch += 1
+            }
         }
     }
+
+    private func maybeStartDbFlush() async {
+        guard dbWriteTask == nil, !dbWriteQueue.isEmpty else { return }
+        let batch = Array(dbWriteQueue.prefix(dbBatchSize))
+        dbWriteQueue.removeFirst(min(dbWriteQueue.count, dbBatchSize))
+        dbWriteTask = Task { [weak self] in
+            for (ruleName, ts) in batch {
+                await self?.store.saveDebounceState(ruleName: ruleName, lastFireTs: ts)
+            }
+            await self?.finishDbFlush()
+        }
+    }
+
+    private func finishDbFlush() {
+        dbWriteTask = nil
+    }
+
+    public func dispatchDroppedCount() -> UInt64 { droppedCount }
 
     public func match(_ event: RawEvent) -> [EventRule] {
         self.rules.filter { rule in
@@ -115,8 +202,8 @@ public actor RuleEngine {
         var stamps = throttleState[rule.ruleName] ?? []
         let window = UInt64(rule.throttleMs)
         stamps = stamps.filter { now - $0 < window }
-        if !stamps.isEmpty {
-            FusionLog.rule.debug("throttle drop \(rule.ruleName, privacy: .public)")
+        if stamps.count >= rule.throttleMaxPerWindow {
+            FusionLog.rule.debug("throttle drop \(rule.ruleName, privacy: .public) count=\(stamps.count)/\(rule.throttleMaxPerWindow)")
             throttleState[rule.ruleName] = stamps
             return false
         }
