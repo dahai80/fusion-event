@@ -1,7 +1,7 @@
 import Foundation
 
 let dataDir = ProcessInfo.processInfo.environment["FUSION_EVENT_DATA"] ?? "\(NSHomeDirectory())/.fusion-event"
-let config = FusionEventConfig.writeDefault(to: dataDir)
+let config = FusionEventConfig.load(dataDir: dataDir)
 FusionLog.lifecycle.info("fusion-event starting, node=\(config.nodeId, privacy: .public), sock=\(config.sockPath, privacy: .public)")
 
 let store = RuleStore(dbPath: "\(dataDir)/rules.db", nodeId: config.nodeId)
@@ -43,10 +43,10 @@ let ipc = IPCServer(
     sockPath: config.sockPath, methods: methods, bus: bus,
     heartbeatSec: config.heartbeatIntervalSec, deadSec: config.heartbeatDeadSec
 )
-let lifecycle = Lifecycle(registry: registry, ipc: ipc, bus: bus)
+let lifecycle = Lifecycle(registry: registry, ipc: ipc, bus: bus, dispatcher: dispatcher)
 
-LifecycleHandle.shared = lifecycle
-LifecycleHandle.installSignals()
+LifecycleHandle.setShared(lifecycle)
+LifecycleHandle.instance.installSignals()
 
 if config.esXpcEnabled {
     let esXpcServer = ESXPCServer(bus: bus, registry: registry)

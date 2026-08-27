@@ -2,6 +2,7 @@ import Foundation
 
 actor IPCServer {
     private let sockPath: String
+    private let allowedUid: uid_t
     private var listenFd: Int32 = -1
     private var running = false
     private let methods: RPCMethods
@@ -10,6 +11,7 @@ actor IPCServer {
     private let deadSec: Int
     private var heartbeatTask: Task<Void, Never>?
     private let bus: EventBus
+    private let maxLineBytes: Int = 1_048_576
 
     init(sockPath: String, methods: RPCMethods, bus: EventBus, heartbeatSec: Int, deadSec: Int) {
         self.sockPath = sockPath
@@ -17,6 +19,7 @@ actor IPCServer {
         self.bus = bus
         self.heartbeatSec = heartbeatSec
         self.deadSec = deadSec
+        self.allowedUid = getuid()
     }
 
     func start() async {
@@ -46,9 +49,9 @@ actor IPCServer {
             return
         }
         Darwin.listen(listenFd, 16)
-        chmod(path, 0o666)
+        chmod(path, 0o600)
         running = true
-        FusionLog.ipc.info("ipc listen \(path, privacy: .public)")
+        FusionLog.ipc.info("ipc listen \(path, privacy: .public) mode=0600 allowed_uid=\(self.allowedUid)")
         startHeartbeat()
         let lfd = listenFd
         Task { [weak self] in await self?.acceptLoop(listenFd: lfd) }
@@ -63,6 +66,7 @@ actor IPCServer {
         }
         for (fd, conn) in connections {
             conn.cont?.finish()
+            conn.markClosed()
             Darwin.close(fd)
         }
         connections.removeAll()
@@ -81,9 +85,30 @@ actor IPCServer {
                 if !alive { break }
                 continue
             }
+            let ok = await checkPeer(fd: cfd)
+            if !ok {
+                FusionLog.ipc.error("ipc reject peer uid mismatch fd=\(cfd)")
+                Darwin.close(cfd)
+                continue
+            }
             await registerConn(fd: cfd)
             Task { [weak self] in await self?.handleClient(fd: cfd) }
         }
+    }
+
+    private func checkPeer(fd: Int32) -> Bool {
+        var cred = xucred()
+        var credLen = socklen_t(MemoryLayout<xucred>.size)
+        let rc = Darwin.getsockopt(fd, SOL_LOCAL, LOCAL_PEERCRED, &cred, &credLen)
+        guard rc == 0 else {
+            FusionLog.ipc.error("ipc getsockopt LOCAL_PEERCRED fail fd=\(fd) errno=\(errno)")
+            return false
+        }
+        if cred.cr_uid != allowedUid {
+            FusionLog.ipc.error("ipc peer uid=\(cred.cr_uid) != allowed=\(self.allowedUid), reject (F1)")
+            return false
+        }
+        return true
     }
 
     private func isRunning() -> Bool { running }
@@ -97,23 +122,44 @@ actor IPCServer {
         await setConnCont(fd: fd, cont: cont)
         Task { [weak self] in await self?.pumpEvents(fd: fd, stream: stream) }
         var buf = Data()
-        var byte: [UInt8] = [0]
+        buf.reserveCapacity(8192)
+        let chunk = UnsafeMutablePointer<UInt8>.allocate(capacity: 8192)
+        defer { chunk.deallocate() }
+        let cap = await maxLine()
         while await isRunning() {
-            let n = Darwin.recv(fd, &byte, 1, 0)
+            let n = Darwin.recv(fd, chunk, 8192, 0)
             if n <= 0 { break }
-            if byte[0] == 0x0A {
-                await processLine(fd: fd, data: buf)
-                buf.removeAll()
-            } else {
-                buf.append(byte[0])
+            let got = UnsafeBufferPointer(start: chunk, count: n)
+            var lineStart = 0
+            for i in 0..<n {
+                if got[i] == 0x0A {
+                    let lineLen = buf.count + (i - lineStart)
+                    if lineLen <= cap {
+                        buf.append(UnsafeBufferPointer(start: chunk.advanced(by: lineStart), count: i - lineStart))
+                        await processLine(fd: fd, data: buf)
+                        buf.removeAll(keepingCapacity: true)
+                    } else {
+                        FusionLog.ipc.error("ipc line oversize \(lineLen) > cap, drop fd=\(fd)")
+                        buf.removeAll(keepingCapacity: true)
+                    }
+                    lineStart = i + 1
+                }
+            }
+            if lineStart < n {
+                buf.append(UnsafeBufferPointer(start: chunk.advanced(by: lineStart), count: n - lineStart))
+                if buf.count > cap {
+                    FusionLog.ipc.error("ipc partial line oversize, drop fd=\(fd)")
+                    buf.removeAll(keepingCapacity: true)
+                }
             }
         }
         cont.finish()
         await bus.removeSubscriber(subId)
-        Darwin.close(fd)
-        await removeConn(fd: fd)
+        await closeConn(fd: fd)
         FusionLog.ipc.info("ipc client disconnect fd=\(fd)")
     }
+
+    private func maxLine() -> Int { maxLineBytes }
 
     private func setConnCont(fd: Int32, cont: AsyncStream<RawEvent>.Continuation) {
         if var conn = connections[fd] {
@@ -123,21 +169,32 @@ actor IPCServer {
         }
     }
 
-    private func removeConn(fd: Int32) {
+    private func closeConn(fd: Int32) {
+        guard let conn = connections[fd] else { return }
+        conn.markClosed()
         connections.removeValue(forKey: fd)
+        Darwin.close(fd)
     }
 
     private nonisolated func pumpEvents(fd: Int32, stream: AsyncStream<RawEvent>) async {
+        let fdLocal = fd
         for await event in stream {
+            let closed = await isConnClosed(fd: fdLocal)
+            guard closed == false else { break }
             let note = RPCNotification(method: "event.notification", params: AnyCodable([
                 "event": Self.eventDict(event),
                 "source": event.sourceType.rawValue
             ] as [String: Any]))
             let data = RPCCodec.line(RPCCodec.encode(note))
-            _ = data.withUnsafeBytes { buf -> Int in
-                Darwin.send(fd, buf.baseAddress, data.count, 0)
-            }
+            let ok = await Self.writeAll(fd: fd, data: data)
+            if !ok { break }
         }
+    }
+
+    private func getConn(fd: Int32) -> ClientConn? { connections[fd] }
+
+    private func isConnClosed(fd: Int32) -> Bool {
+        connections[fd]?.isClosed() ?? true
     }
 
     private nonisolated func processLine(fd: Int32, data: Data) async {
@@ -145,14 +202,14 @@ actor IPCServer {
         guard !data.isEmpty else { return }
         guard let req = RPCCodec.decodeRequest(data) else {
             let err = RPCResponse(id: nil, result: nil, error: RPCError(code: RPCErrorCode.parseError.rawValue, message: "parse error"))
-            Self.send(fd: fd, resp: err)
+            await Self.writeAll(fd: fd, data: RPCCodec.line(RPCCodec.encode(err)))
             return
         }
         if req.method == "event.pong" {
             return
         }
         let resp = await methods.dispatch(req: req)
-        Self.send(fd: fd, resp: resp)
+        await Self.writeAll(fd: fd, data: RPCCodec.line(RPCCodec.encode(resp)))
     }
 
     private func touchConn(fd: Int32) {
@@ -162,11 +219,28 @@ actor IPCServer {
         }
     }
 
-    private nonisolated static func send(fd: Int32, resp: RPCResponse) {
-        let data = RPCCodec.line(RPCCodec.encode(resp))
-        _ = data.withUnsafeBytes { buf -> Int in
-            Darwin.send(fd, buf.baseAddress, data.count, 0)
+    private nonisolated static func writeAll(fd: Int32, data: Data) async -> Bool {
+        var sent = 0
+        while sent < data.count {
+            let n = data.withUnsafeBytes { buf -> Int in
+                guard let base = buf.baseAddress?.advanced(by: sent) else { return -1 }
+                return Darwin.send(fd, base, data.count - sent, 0)
+            }
+            if n <= 0 { return false }
+            sent += n
         }
+        return true
+    }
+
+    private nonisolated static func eventDict(_ e: RawEvent) -> [String: Any] {
+        [
+            "eventId": UUID().uuidString,
+            "type": e.sourceType.rawValue,
+            "targetPath": e.targetPath ?? "",
+            "timestamp": e.timestamp,
+            "payload": e.payload,
+            "nodeId": ""
+        ]
     }
 
     private func startHeartbeat() {
@@ -183,33 +257,35 @@ actor IPCServer {
         let now = UInt64(Date().timeIntervalSince1970)
         let note = RPCNotification(method: "event.heartbeat", params: AnyCodable(["ts": now]))
         let data = RPCCodec.line(RPCCodec.encode(note))
+        var dead: [Int32] = []
         for (fd, conn) in connections {
-            _ = data.withUnsafeBytes { buf -> Int in
-                Darwin.send(fd, buf.baseAddress, data.count, 0)
+            let ok = await Self.writeAll(fd: fd, data: data)
+            if !ok || now - conn.lastSeen > UInt64(deadSec) {
+                dead.append(fd)
             }
-            if now - conn.lastSeen > UInt64(deadSec) {
-                FusionLog.ipc.notice("ipc dead connection fd=\(fd), cleanup (E6)")
+        }
+        for fd in dead {
+            FusionLog.ipc.notice("ipc dead/closed connection fd=\(fd), cleanup (E6)")
+            if let conn = connections[fd] {
                 conn.cont?.finish()
-                Darwin.close(fd)
+                conn.markClosed()
                 connections.removeValue(forKey: fd)
+                Darwin.close(fd)
             }
         }
     }
 
-    private nonisolated static func eventDict(_ e: RawEvent) -> [String: Any] {
-        [
-            "eventId": UUID().uuidString,
-            "type": e.sourceType.rawValue,
-            "targetPath": e.targetPath ?? "",
-            "timestamp": e.timestamp,
-            "payload": e.payload,
-            "nodeId": ""
-        ]
-    }
-
-    struct ClientConn {
+    final class ClientConn {
         let fd: Int32
         var cont: AsyncStream<RawEvent>.Continuation?
         var lastSeen: UInt64 = 0
+        private var closed: Bool = false
+
+        init(fd: Int32) {
+            self.fd = fd
+        }
+
+        func markClosed() { closed = true }
+        func isClosed() -> Bool { closed }
     }
 }

@@ -51,6 +51,7 @@ public actor AuditBridge {
             case .challenge: return .challenge(res)
             }
         } catch let err as UDSClientError {
+            await resetClientOnError(err)
             switch err {
             case .connectionFailed:
                 return decideDegrade(signal: signal, reason: "guard not running")
@@ -90,7 +91,15 @@ public actor AuditBridge {
         return c
     }
 
+    private func resetClientOnError(_ err: UDSClientError) async {
+        guard client != nil else { return }
+        FusionLog.bridge.error("audit reset client after \(err), discard poisoned connection")
+        await client?.close()
+        client = nil
+    }
+
     public func close() async {
+        await client?.close()
         client = nil
     }
 }

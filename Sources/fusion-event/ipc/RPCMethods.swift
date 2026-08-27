@@ -57,6 +57,7 @@ actor RPCMethods {
     private func health(req: RPCRequest) async -> RPCResponse {
         let now = UInt64(Date().timeIntervalSince1970)
         let stats = await dispatcher.stats()
+        let dropped = await ruleEngine.dispatchDroppedCount()
         let src = await registry.health()
         return ok(req, [
             "ok": true,
@@ -67,7 +68,9 @@ actor RPCMethods {
             "triggers": [
                 "submitted": stats["submitted"] ?? 0,
                 "blocked": stats["blocked"] ?? 0,
-                "failed": stats["failed"] ?? 0
+                "failed": stats["failed"] ?? 0,
+                "dropped": stats["dropped"] ?? 0,
+                "dispatch_dropped": dropped
             ] as [String: UInt64],
             "sock": config.sockPath,
             "node_id": config.nodeId
@@ -90,6 +93,7 @@ actor RPCMethods {
             pathPattern: value["path_pattern"] as? String,
             debounceMs: value["debounce_ms"] as? Int ?? 0,
             throttleMs: value["throttle_ms"] as? Int ?? 0,
+            throttleMaxPerWindow: value["throttle_max_per_window"] as? Int ?? 1,
             targetAgent: agent,
             targetGraphId: value["target_graph_id"] as? String,
             enabled: value["enabled"] as? Bool ?? true,
@@ -97,6 +101,9 @@ actor RPCMethods {
             requireGuard: value["require_guard"] as? Bool ?? false
         )
         let added = await ruleEngine.addRule(rule)
+        if added {
+            FusionLog.lifecycle.notice("audit rule.add name=\(name, privacy: .public) type=\(type.rawValue) agent=\(agent, privacy: .public) guard=\(rule.requireGuard) (M4)")
+        }
         return added ? ok(req, ["rule_name": name, "ok": true]) : err(req, code: RPCErrorCode.internalError.rawValue, message: "rule add fail")
     }
 
@@ -106,6 +113,9 @@ actor RPCMethods {
             return err(req, code: RPCErrorCode.ruleValidation.rawValue, message: "missing rule_name")
         }
         let removed = await ruleEngine.removeRule(name)
+        if removed {
+            FusionLog.lifecycle.notice("audit rule.remove name=\(name, privacy: .public) (M4)")
+        }
         return removed ? ok(req, ["ok": true]) : err(req, code: RPCErrorCode.internalError.rawValue, message: "rule remove fail")
     }
 

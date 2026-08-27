@@ -93,14 +93,23 @@ public actor EndpointSecuritySource: EventSource {
         default:
             return nil
         }
-        let process = msg.process
-        let pid = audit_token_to_pid(process.pointee.audit_token)
+        let processPtr = msg.process
+        guard let processPtrOpt: UnsafeMutablePointer<es_process_t>? = processPtr, processPtrOpt != nil else {
+            FusionLog.source.error("es extract process nil, skip")
+            return nil
+        }
+        let process = processPtr.pointee
+        let pid = audit_token_to_pid(process.audit_token)
         let execPath: String? = {
-            let exec = process.pointee.executable
-            let tok = exec.pointee.path
+            let execPtr = process.executable
+            guard let execPtrOpt: UnsafeMutablePointer<es_file_t>? = execPtr, execPtrOpt != nil else { return nil }
+            let exec = execPtr.pointee
+            let tok = exec.path
             guard tok.length > 0 else { return nil }
-            return tok.data.withMemoryRebound(to: UInt8.self, capacity: tok.length) { ptr in
-                String(bytes: UnsafeBufferPointer(start: ptr, count: tok.length), encoding: .utf8)
+            guard let dataPtr = tok.data else { return nil }
+            let len = Int(tok.length)
+            return dataPtr.withMemoryRebound(to: UInt8.self, capacity: len) { ptr in
+                String(bytes: UnsafeBufferPointer(start: ptr, count: len), encoding: .utf8)
             }
         }()
         let now = UInt64(Date().timeIntervalSince1970 * 1000)

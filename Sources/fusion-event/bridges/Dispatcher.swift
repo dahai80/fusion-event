@@ -7,7 +7,10 @@ public actor Dispatcher: TriggerSink {
     private var availableTokens: Int
     private var pendingQueue: [TriggerSignal] = []
     private var recentKeys: [String: (taskId: String, expiryTs: UInt64)] = [:]
+    private var recentKeyOrder: [String] = []
     private let keyTtlMs: UInt64 = 60_000
+    private let keyMaxEntries: Int = 10_000
+    private let queueMax: Int = 50
     private var client: UDSClient?
     private var auditBridge: AuditBridge?
     private var contextBridge: ContextBridge?
@@ -15,6 +18,8 @@ public actor Dispatcher: TriggerSink {
     private var submittedCount: UInt64 = 0
     private var blockedCount: UInt64 = 0
     private var failedCount: UInt64 = 0
+    private var droppedCount: UInt64 = 0
+    private var shuttingDown = false
 
     init(
         sockPath: String,
@@ -41,24 +46,24 @@ public actor Dispatcher: TriggerSink {
             FusionLog.bridge.notice("duplicate trigger suppressed idem=\(signal.idempotencyKey, privacy: .public) (H1)")
             return
         }
-        recentKeys[signal.idempotencyKey] = ("pending", now + keyTtlMs)
         if availableTokens > 0 {
             availableTokens -= 1
             await runTriggerChain(signal: signal, now: now)
             availableTokens += 1
             await drainQueue(now: now)
         } else {
+            if pendingQueue.count >= queueMax {
+                let dropped = pendingQueue.removeFirst()
+                droppedCount += 1
+                FusionLog.bridge.error("trigger queue overflow (max \(self.queueMax)), drop oldest \(dropped.triggerId, privacy: .public)")
+            }
             pendingQueue.append(signal)
             FusionLog.bridge.notice("trigger queue backlog, \(self.pendingQueue.count, privacy: .public) waiting (R1)")
-            if pendingQueue.count > 50 {
-                let dropped = pendingQueue.removeFirst()
-                FusionLog.bridge.error("trigger queue overflow, drop \(dropped.triggerId, privacy: .public)")
-            }
         }
     }
 
     private func drainQueue(now: UInt64) async {
-        guard !pendingQueue.isEmpty, availableTokens > 0 else { return }
+        guard !pendingQueue.isEmpty, availableTokens > 0, !shuttingDown else { return }
         let next = pendingQueue.removeFirst()
         availableTokens -= 1
         await runTriggerChain(signal: next, now: now)
@@ -76,6 +81,7 @@ public actor Dispatcher: TriggerSink {
         case .block(let res):
             blockedCount += 1
             FusionLog.bridge.notice("guard block \(signal.triggerId, privacy: .public): \(res.reason)")
+            occupyKey(signal.idempotencyKey, taskId: "blocked", now: now)
             await eventLog.recordTrigger(
                 triggerId: signal.triggerId, taskId: nil,
                 idempotencyKey: signal.idempotencyKey, event: signal.event,
@@ -85,6 +91,7 @@ public actor Dispatcher: TriggerSink {
         case .failClosed(let reason):
             blockedCount += 1
             FusionLog.bridge.error("fail-closed \(signal.triggerId, privacy: .public): \(reason)")
+            occupyKey(signal.idempotencyKey, taskId: "failclosed", now: now)
             await eventLog.recordTrigger(
                 triggerId: signal.triggerId, taskId: nil,
                 idempotencyKey: signal.idempotencyKey, event: signal.event,
@@ -125,7 +132,7 @@ public actor Dispatcher: TriggerSink {
             if let res = resp.result?.value as? [String: Any], let task = res["task"] as? [String: Any] {
                 taskId = task["task_id"] as? String
             }
-            recentKeys[signal.idempotencyKey] = (taskId ?? "unknown", now + keyTtlMs)
+            occupyKey(signal.idempotencyKey, taskId: taskId ?? "unknown", now: now)
             submittedCount += 1
             FusionLog.bridge.info("task.submit ok trigger=\(signal.triggerId, privacy: .public) task=\(taskId ?? "?") idem=\(signal.idempotencyKey, privacy: .public)")
             await eventLog.recordTrigger(
@@ -135,6 +142,7 @@ public actor Dispatcher: TriggerSink {
             )
         } catch let err as UDSClientError {
             failedCount += 1
+            await resetClient()
             switch err {
             case .connectionFailed:
                 FusionLog.bridge.error("task.submit fail agent-studio not running, no retry (R3) trigger=\(signal.triggerId)")
@@ -165,8 +173,33 @@ public actor Dispatcher: TriggerSink {
         ]
     }
 
+    private func occupyKey(_ key: String, taskId: String, now: UInt64) {
+        if recentKeys[key] == nil {
+            recentKeyOrder.append(key)
+        }
+        recentKeys[key] = (taskId, now + keyTtlMs)
+        if recentKeys.count > keyMaxEntries {
+            let evictKey = recentKeyOrder.removeFirst()
+            recentKeys.removeValue(forKey: evictKey)
+        }
+    }
+
     private func purgeExpiredKeys(now: UInt64) {
-        recentKeys = recentKeys.filter { $0.value.expiryTs > now }
+        var expired: [String] = []
+        for (k, v) in recentKeys where v.expiryTs <= now {
+            expired.append(k)
+        }
+        for k in expired {
+            recentKeys.removeValue(forKey: k)
+            recentKeyOrder.removeAll { $0 == k }
+        }
+    }
+
+    private func resetClient() async {
+        guard client != nil else { return }
+        FusionLog.bridge.error("dispatcher reset studio client, discard poisoned connection")
+        await client?.close()
+        client = nil
     }
 
     private func callWithTimeout(_ req: RPCRequest) async throws -> RPCResponse {
@@ -184,7 +217,25 @@ public actor Dispatcher: TriggerSink {
         return c
     }
 
+    public func drainForShutdown() async {
+        shuttingDown = true
+        let pending = pendingQueue
+        pendingQueue.removeAll()
+        if !pending.isEmpty {
+            FusionLog.bridge.notice("shutdown drain: drop \(pending.count) pending triggers (logged, no submit)")
+            for sig in pending {
+                await eventLog.recordTrigger(
+                    triggerId: sig.triggerId, taskId: nil,
+                    idempotencyKey: sig.idempotencyKey, event: sig.event,
+                    matchedRules: [sig.rule.ruleName]
+                )
+            }
+        }
+        await client?.close()
+        client = nil
+    }
+
     public func stats() -> [String: UInt64] {
-        ["submitted": submittedCount, "blocked": blockedCount, "failed": failedCount]
+        ["submitted": submittedCount, "blocked": blockedCount, "failed": failedCount, "dropped": droppedCount]
     }
 }

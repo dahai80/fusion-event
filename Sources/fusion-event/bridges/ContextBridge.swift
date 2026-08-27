@@ -45,6 +45,7 @@ public actor ContextBridge {
             cache[bucket] = (cr, now + UInt64(ttlSec) * 1000)
             return cr
         } catch let err as UDSClientError {
+            await resetClientOnError(err)
             switch err {
             case .connectionFailed:
                 FusionLog.bridge.notice("memory not running -> fallback")
@@ -94,5 +95,12 @@ public actor ContextBridge {
         let c = UDSClient(sockPath: sockPath)
         client = c
         return c
+    }
+
+    private func resetClientOnError(_ err: UDSClientError) async {
+        guard client != nil else { return }
+        FusionLog.bridge.error("context reset client after \(err), discard poisoned connection")
+        await client?.close()
+        client = nil
     }
 }

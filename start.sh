@@ -21,6 +21,11 @@ resolve_bin() {
 }
 
 do_start() {
+    exec 9>"$DATA_DIR.lock"
+    if ! flock -n 9; then
+        echo "ERROR: another start.sh instance holding lock, abort (M5)" >&2
+        exit 1
+    fi
     local bin
     bin="$(resolve_bin)"
     if [[ -z "$bin" ]]; then
@@ -34,11 +39,12 @@ do_start() {
         echo "already running pid=$(cat "$PID_FILE")"
         return 0
     fi
-    nohup "$bin" >> "$LOG_FILE" 2>&1 &
-    echo $! > "$PID_FILE"
+    setsid "$bin" >> "$LOG_FILE" 2>&1 &
+    local pid=$!
+    echo "$pid" > "$PID_FILE"
     sleep 1
-    if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-        echo "started pid=$(cat "$PID_FILE") sock=$SOCK"
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "started pid=$pid sock=$SOCK"
     else
         echo "ERROR: start failed, see $LOG_FILE" >&2
         exit 1

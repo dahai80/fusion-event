@@ -5,6 +5,8 @@ public enum SystemEventType: String, Codable, Sendable {
     case processTerminated
     case clipboardChanged
     case networkStatusChanged
+    case systemWake
+    case systemSleep
 }
 
 public struct SystemEvent: Codable, Sendable, Equatable {
@@ -60,6 +62,7 @@ public struct EventRule: Codable, Sendable, Equatable {
     public let pathPattern: String?
     public let debounceMs: Int
     public let throttleMs: Int
+    public let throttleMaxPerWindow: Int
     public let targetAgent: String
     public let targetGraphId: String?
     public let enabled: Bool
@@ -72,6 +75,7 @@ public struct EventRule: Codable, Sendable, Equatable {
         pathPattern: String?,
         debounceMs: Int,
         throttleMs: Int,
+        throttleMaxPerWindow: Int = 1,
         targetAgent: String,
         targetGraphId: String?,
         enabled: Bool,
@@ -83,6 +87,7 @@ public struct EventRule: Codable, Sendable, Equatable {
         self.pathPattern = pathPattern
         self.debounceMs = debounceMs
         self.throttleMs = throttleMs
+        self.throttleMaxPerWindow = max(throttleMaxPerWindow, 1)
         self.targetAgent = targetAgent
         self.targetGraphId = targetGraphId
         self.enabled = enabled

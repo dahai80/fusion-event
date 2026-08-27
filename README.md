@@ -26,8 +26,9 @@ M0–M4 implemented and verified:
 | M2 | AuditBridge + ContextBridge wired, 3-state timeout degrade, token bucket, idempotency LRU | done |
 | M3 | EndpointSecurity privileged process events (exec/exit/fork) | in-process + degrade — esEnabled flag, fail-closed to NSWorkspace |
 | M4 | Ecosystem hardening: multi-node boundary (H2), 2000-event stress + backpressure (H5), idempotency collapse (H1), token-bucket drain (R1), docs (API + integration + glob spec E1) | done — internal-verifiable parts; upstream studio/cli/guard/memory联调 via frozen contract (issue-tracked) |
+| M5 | Adversarial audit hardening (P0–P3): F1 socket 0600 + peer-uid auth, F2 ingest/dispatch decouple + bounded backpressure (drop-counted, not silent), F4 ES NULL guard, F5 poisoned-conn reset, F6 fd ownership, F7 config persist, F8 recv OOM cap, F9 idempotency-occupy only on success/block, L1 signal race, L2 LRU+queue cap, L3 N-per-window throttle, L4 wake type, L5 param SQL, L6 FSEvents UAF, L7 shutdown drain, L8 write-all, P1–P3 EventLog perf, M1–M5 | done — see `docs/audit-fixes-0827.md` |
 
-Tests: 39 unit tests, all passing (`swift test`).
+Tests: 39 unit tests, all passing (`swift test`), 1.7s.
 
 ### Phase-2 — System Extension + XPC (L1 skeleton, contract frozen)
 

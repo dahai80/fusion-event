@@ -7,6 +7,7 @@ public actor NSWorkspaceSource: EventSource {
     private let registry: SourceRegistry
     private var observers: [NSObjectProtocol] = []
     private var wakeObserver: NSObjectProtocol?
+    private var sleepObserver: NSObjectProtocol?
     private var mountObserver: NSObjectProtocol?
 
     public init(bus: EventBus, registry: SourceRegistry) {
@@ -28,11 +29,22 @@ public actor NSWorkspaceSource: EventSource {
         wakeObserver = nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: nil) { [weak self] _ in
             let now = UInt64(Date().timeIntervalSince1970 * 1000)
             let ev = RawEvent(
-                sourceType: .networkStatusChanged, targetPath: nil, timestamp: now,
+                sourceType: .systemWake, targetPath: nil, timestamp: now,
                 payload: ["wake": "1"], rawFlags: 0
             )
             Task {
-                await self?.registry.tickCount(.networkStatusChanged)
+                await self?.registry.tickCount(.systemWake)
+                await self?.bus?.publish(ev)
+            }
+        }
+        sleepObserver = nc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: nil) { [weak self] _ in
+            let now = UInt64(Date().timeIntervalSince1970 * 1000)
+            let ev = RawEvent(
+                sourceType: .systemSleep, targetPath: nil, timestamp: now,
+                payload: ["sleep": "1"], rawFlags: 0
+            )
+            Task {
+                await self?.registry.tickCount(.systemSleep)
                 await self?.bus?.publish(ev)
             }
         }
@@ -81,9 +93,11 @@ public actor NSWorkspaceSource: EventSource {
         let nc = NSWorkspace.shared.notificationCenter
         observers.forEach { nc.removeObserver($0) }
         if let w = wakeObserver { nc.removeObserver(w) }
+        if let s = sleepObserver { nc.removeObserver(s) }
         if let m = mountObserver { nc.removeObserver(m) }
         observers.removeAll()
         wakeObserver = nil
+        sleepObserver = nil
         mountObserver = nil
         FusionLog.source.info("nsworkspace source stop")
     }

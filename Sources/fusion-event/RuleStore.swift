@@ -30,6 +30,7 @@ actor RuleStore {
             path_pattern   TEXT,
             debounce_ms    INTEGER DEFAULT 0,
             throttle_ms    INTEGER DEFAULT 0,
+            throttle_max_per_window INTEGER DEFAULT 1,
             target_agent   TEXT NOT NULL,
             target_graph_id TEXT DEFAULT '',
             enabled        INTEGER DEFAULT 1,
@@ -51,6 +52,7 @@ actor RuleStore {
         } else {
             FusionLog.persist.info("rulestore ready \(dbPath, privacy: .public)")
         }
+        sqlite3_exec(handle, "ALTER TABLE rules ADD COLUMN throttle_max_per_window INTEGER DEFAULT 1;", nil, nil, nil)
     }
 
     deinit {
@@ -61,7 +63,7 @@ actor RuleStore {
         guard db != nil else { return [] }
         var rules: [EventRule] = []
         var stmt: OpaquePointer?
-        let sql = "SELECT rule_name,event_type,path_pattern,debounce_ms,throttle_ms,target_agent,target_graph_id,enabled,max_retries,require_guard FROM rules;"
+        let sql = "SELECT rule_name,event_type,path_pattern,debounce_ms,throttle_ms,throttle_max_per_window,target_agent,target_graph_id,enabled,max_retries,require_guard FROM rules;"
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             while sqlite3_step(stmt) == SQLITE_ROW {
                 let name = String(cString: sqlite3_column_text(stmt, 0))
@@ -70,16 +72,18 @@ actor RuleStore {
                 let path = pathCol == nil ? nil : String(cString: pathCol!)
                 let deb = sqlite3_column_int(stmt, 3)
                 let thr = sqlite3_column_int(stmt, 4)
-                let agent = String(cString: sqlite3_column_text(stmt, 5))
-                let graphCol = sqlite3_column_text(stmt, 6)
+                let thrMax = sqlite3_column_int(stmt, 5)
+                let agent = String(cString: sqlite3_column_text(stmt, 6))
+                let graphCol = sqlite3_column_text(stmt, 7)
                 let graph = graphCol == nil ? nil : String(cString: graphCol!)
-                let en = sqlite3_column_int(stmt, 7) != 0
-                let mr = sqlite3_column_int(stmt, 8)
-                let rg = sqlite3_column_int(stmt, 9) != 0
+                let en = sqlite3_column_int(stmt, 8) != 0
+                let mr = sqlite3_column_int(stmt, 9)
+                let rg = sqlite3_column_int(stmt, 10) != 0
                 guard let et = SystemEventType(rawValue: type) else { continue }
                 rules.append(EventRule(
                     ruleName: name, eventType: et, pathPattern: path,
                     debounceMs: Int(deb), throttleMs: Int(thr),
+                    throttleMaxPerWindow: Int(thrMax),
                     targetAgent: agent, targetGraphId: graph, enabled: en,
                     maxRetries: Int(mr), requireGuard: rg
                 ))
@@ -94,11 +98,11 @@ actor RuleStore {
         let now = Date().timeIntervalSince1970
         var stmt: OpaquePointer?
         let sql = """
-        INSERT INTO rules(rule_name,event_type,path_pattern,debounce_ms,throttle_ms,target_agent,target_graph_id,enabled,max_retries,require_guard,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO rules(rule_name,event_type,path_pattern,debounce_ms,throttle_ms,throttle_max_per_window,target_agent,target_graph_id,enabled,max_retries,require_guard,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(rule_name) DO UPDATE SET
             event_type=excluded.event_type,path_pattern=excluded.path_pattern,
-            debounce_ms=excluded.debounce_ms,throttle_ms=excluded.throttle_ms,
+            debounce_ms=excluded.debounce_ms,throttle_ms=excluded.throttle_ms,throttle_max_per_window=excluded.throttle_max_per_window,
             target_agent=excluded.target_agent,target_graph_id=excluded.target_graph_id,
             enabled=excluded.enabled,max_retries=excluded.max_retries,require_guard=excluded.require_guard,updated_at=excluded.updated_at;
         """
@@ -111,13 +115,14 @@ actor RuleStore {
         if let p = rule.pathPattern { sqlite3_bind_text(stmt, 3, p, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 3) }
         sqlite3_bind_int(stmt, 4, Int32(rule.debounceMs))
         sqlite3_bind_int(stmt, 5, Int32(rule.throttleMs))
-        sqlite3_bind_text(stmt, 6, rule.targetAgent, -1, SQLITE_TRANSIENT)
-        if let g = rule.targetGraphId, !g.isEmpty { sqlite3_bind_text(stmt, 7, g, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_text(stmt, 7, "", -1, SQLITE_TRANSIENT) }
-        sqlite3_bind_int(stmt, 8, rule.enabled ? 1 : 0)
-        sqlite3_bind_int(stmt, 9, Int32(rule.maxRetries))
-        sqlite3_bind_int(stmt, 10, rule.requireGuard ? 1 : 0)
-        sqlite3_bind_double(stmt, 11, now)
+        sqlite3_bind_int(stmt, 6, Int32(rule.throttleMaxPerWindow))
+        sqlite3_bind_text(stmt, 7, rule.targetAgent, -1, SQLITE_TRANSIENT)
+        if let g = rule.targetGraphId, !g.isEmpty { sqlite3_bind_text(stmt, 8, g, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_text(stmt, 8, "", -1, SQLITE_TRANSIENT) }
+        sqlite3_bind_int(stmt, 9, rule.enabled ? 1 : 0)
+        sqlite3_bind_int(stmt, 10, Int32(rule.maxRetries))
+        sqlite3_bind_int(stmt, 11, rule.requireGuard ? 1 : 0)
         sqlite3_bind_double(stmt, 12, now)
+        sqlite3_bind_double(stmt, 13, now)
         let rc = sqlite3_step(stmt)
         sqlite3_finalize(stmt)
         if rc != SQLITE_DONE {
@@ -131,12 +136,22 @@ actor RuleStore {
     func remove(_ name: String) -> Bool {
         guard db != nil else { return false }
         var stmt: OpaquePointer?
-        sqlite3_prepare_v2(db, "DELETE FROM rules WHERE rule_name=?;", -1, &stmt, nil)
+        guard sqlite3_prepare_v2(db, "DELETE FROM rules WHERE rule_name=?;", -1, &stmt, nil) == SQLITE_OK else {
+            FusionLog.persist.error("rulestore remove prepare fail")
+            return false
+        }
         sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT)
         let rc = sqlite3_step(stmt)
         sqlite3_finalize(stmt)
-        let delDeb = sqlite3_exec(db, "DELETE FROM debounce_state WHERE rule_name='\(escape(name))';", nil, nil, nil) == SQLITE_OK
-        FusionLog.persist.info("rulestore remove \(name, privacy: .public) rc=\(rc == SQLITE_DONE)")
+        var debStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM debounce_state WHERE rule_name=?;", -1, &debStmt, nil) == SQLITE_OK else {
+            FusionLog.persist.error("rulestore remove debounce prepare fail")
+            return rc == SQLITE_DONE
+        }
+        sqlite3_bind_text(debStmt, 1, name, -1, SQLITE_TRANSIENT)
+        let delDeb = sqlite3_step(debStmt) == SQLITE_DONE
+        sqlite3_finalize(debStmt)
+        FusionLog.persist.info("rulestore remove \(name, privacy: .public) rc=\(rc == SQLITE_DONE) deb=\(delDeb)")
         return rc == SQLITE_DONE && delDeb
     }
 
@@ -165,9 +180,5 @@ actor RuleStore {
         sqlite3_bind_text(stmt, 3, nodeId, -1, SQLITE_TRANSIENT)
         sqlite3_step(stmt)
         sqlite3_finalize(stmt)
-    }
-
-    private func escape(_ s: String) -> String {
-        s.replacingOccurrences(of: "'", with: "''")
     }
 }

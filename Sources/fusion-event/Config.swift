@@ -73,22 +73,4 @@ struct FusionEventConfig: Codable, Sendable {
         }
         return cfg
     }
-
-    static func writeDefault(to dataDir: String) -> FusionEventConfig {
-        var cfg = FusionEventConfig.default
-        cfg.dataDir = dataDir
-        let path = "\(dataDir)/config.json"
-        do {
-            let fm = FileManager.default
-            try? fm.createDirectory(atPath: dataDir, withIntermediateDirectories: true)
-            let enc = JSONEncoder()
-            enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let out = try enc.encode(cfg)
-            try out.write(to: URL(fileURLWithPath: path))
-            FusionLog.lifecycle.info("config default written \(path, privacy: .public)")
-        } catch {
-            FusionLog.lifecycle.error("config write fail \(error.localizedDescription, privacy: .public)")
-        }
-        return cfg
-    }
 }

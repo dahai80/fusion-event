@@ -75,9 +75,12 @@ final class RuleEngineTests: XCTestCase {
         await engine.setSink(sink)
         _ = await engine.addRule(makeRule(debounceMs: 200))
         await engine.process(RawEvent(sourceType: .fileModified, targetPath: "/src/a.swift", timestamp: 1000, payload: [:], rawFlags: 0))
+        await engine.flush()
         await engine.process(RawEvent(sourceType: .fileModified, targetPath: "/src/a.swift", timestamp: 1100, payload: [:], rawFlags: 0))
+        await engine.flush()
         XCTAssertEqual(sink.value, 1)
         await engine.process(RawEvent(sourceType: .fileModified, targetPath: "/src/a.swift", timestamp: 1300, payload: [:], rawFlags: 0))
+        await engine.flush()
         XCTAssertEqual(sink.value, 2)
     }
 
@@ -87,10 +90,13 @@ final class RuleEngineTests: XCTestCase {
         await engine.setSink(sink)
         _ = await engine.addRule(makeRule(throttleMs: 200))
         await engine.process(RawEvent(sourceType: .fileModified, targetPath: "/src/a.swift", timestamp: 1000, payload: [:], rawFlags: 0))
+        await engine.flush()
         await engine.process(RawEvent(sourceType: .fileModified, targetPath: "/src/a.swift", timestamp: 1100, payload: [:], rawFlags: 0))
         await engine.process(RawEvent(sourceType: .fileModified, targetPath: "/src/a.swift", timestamp: 1150, payload: [:], rawFlags: 0))
+        await engine.flush()
         XCTAssertEqual(sink.value, 1)
         await engine.process(RawEvent(sourceType: .fileModified, targetPath: "/src/a.swift", timestamp: 1500, payload: [:], rawFlags: 0))
+        await engine.flush()
         XCTAssertEqual(sink.value, 2)
     }
 
@@ -129,6 +135,7 @@ final class RuleEngineTests: XCTestCase {
         let sink1 = CountSink()
         await engine1.setSink(sink1)
         await engine1.process(RawEvent(sourceType: .processTerminated, targetPath: "/usr/bin/ls", timestamp: nowMs, payload: [:], rawFlags: 0))
+        await engine1.flush()
         await eventLog.recordTrigger(triggerId: "t1", taskId: nil, idempotencyKey: "k1",
             event: SystemEvent(eventId: "e1", type: .processTerminated, targetPath: "/usr/bin/ls",
                 timestamp: nowMs, payload: [:], nodeId: "n1"),

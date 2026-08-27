@@ -3,6 +3,7 @@ import XCTest
 
 final class DispatcherTests: XCTestCase {
     private var tmpDir: String = ""
+    private var mock: MockStudio?
 
     override func setUp() {
         super.setUp()
@@ -11,15 +12,26 @@ final class DispatcherTests: XCTestCase {
     }
 
     override func tearDown() {
+        mock?.stop()
+        mock = nil
         if !tmpDir.isEmpty {
             try? FileManager.default.removeItem(atPath: tmpDir)
         }
         super.tearDown()
     }
 
-    private func makeDispatcher(bucketMax: Int = 5) -> Dispatcher {
+    private func makeDispatcher(bucketMax: Int = 5, sockPath: String? = nil) -> Dispatcher {
         let eventLog = EventLog(logPath: tmpDir + "event.log")
-        return Dispatcher(sockPath: "/tmp/fe-nonexistent-\(UUID().uuidString).sock", timeoutSec: 1, tokenBucketMax: bucketMax, eventLog: eventLog)
+        let path = sockPath ?? "/tmp/fe-nonexistent-\(UUID().uuidString).sock"
+        return Dispatcher(sockPath: path, timeoutSec: 1, tokenBucketMax: bucketMax, eventLog: eventLog)
+    }
+
+    private func startMockStudio() throws -> String {
+        let path = tmpDir + "studio.sock"
+        let m = MockStudio(sockPath: path)
+        try m.start()
+        mock = m
+        return path
     }
 
     private func makeSignal(requireGuard: Bool = false) -> TriggerSignal {
@@ -28,8 +40,9 @@ final class DispatcherTests: XCTestCase {
         return Normalizer.normalize(event: raw, rule: rule, nodeId: "n1")
     }
 
-    func testIdempotencySuppressesDuplicateKey() async {
-        let dispatcher = makeDispatcher()
+    func testIdempotencySuppressesDuplicateKey() async throws {
+        let studioPath = try startMockStudio()
+        let dispatcher = makeDispatcher(sockPath: studioPath)
         let audit = AuditBridge(sockPath: "/tmp/fe-noaudit-\(UUID().uuidString).sock", timeoutSec: 1)
         let ctx = ContextBridge(sockPath: "/tmp/fe-nomem-\(UUID().uuidString).sock", timeoutSec: 1, ttlSec: 60)
         await dispatcher.setBridges(audit: audit, context: ctx)
@@ -37,7 +50,8 @@ final class DispatcherTests: XCTestCase {
         await dispatcher.onTrigger(signal)
         await dispatcher.onTrigger(signal)
         let stats = await dispatcher.stats()
-        XCTAssertLessThanOrEqual(stats["submitted"]! + stats["failed"]!, 1)
+        XCTAssertEqual(stats["submitted"], 1, "first task.submit succeeds, occupies idempotency key (F9)")
+        XCTAssertEqual(stats["failed"], 0)
         XCTAssertEqual(stats["blocked"], 0)
     }
 
@@ -55,9 +69,10 @@ final class DispatcherTests: XCTestCase {
     func testStatsShape() async {
         let dispatcher = makeDispatcher()
         let stats = await dispatcher.stats()
-        XCTAssertEqual(stats.count, 3)
+        XCTAssertEqual(stats.count, 4)
         XCTAssertNotNil(stats["submitted"])
         XCTAssertNotNil(stats["blocked"])
         XCTAssertNotNil(stats["failed"])
+        XCTAssertNotNil(stats["dropped"])
     }
 }

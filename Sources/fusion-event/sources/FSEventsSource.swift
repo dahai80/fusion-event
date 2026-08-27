@@ -6,6 +6,7 @@ public actor FSEventsSource: EventSource {
     private let rootPath: String
     private weak var bus: EventBus?
     private var stream: FSEventStreamRef?
+    private var infoPtr: UnsafeMutableRawPointer?
     private let registry: SourceRegistry
     private let runLoop = DispatchQueue(label: "fusion-event.fsevents")
 
@@ -22,7 +23,10 @@ public actor FSEventsSource: EventSource {
             return
         }
         var context = FSEventStreamContext(version: 0, info: nil, retain: nil, release: nil, copyDescription: nil)
-        context.info = Unmanaged.passUnretained(self).toOpaque()
+        let unmanaged = Unmanaged<FSEventsSource>.passRetained(self)
+        let ptr = unmanaged.toOpaque()
+        context.info = ptr
+        infoPtr = ptr
         let flags: FSEventStreamCreateFlags = UInt32(kFSEventStreamCreateFlagFileEvents) | UInt32(kFSEventStreamCreateFlagNoDefer)
         let streamRef = FSEventStreamCreate(
             kCFAllocatorDefault,
@@ -67,6 +71,11 @@ public actor FSEventsSource: EventSource {
             FSEventStreamRelease(stream)
             self.stream = nil
         }
+        if let ptr = infoPtr {
+            Unmanaged<FSEventsSource>.fromOpaque(ptr).release()
+            infoPtr = nil
+        }
+        FusionLog.source.info("fsevents stop")
     }
 
     private func handleEvents(paths: [String], flags: [UInt32]) async {
