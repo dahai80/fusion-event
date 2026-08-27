@@ -6,8 +6,10 @@ actor RPCMethods {
     private let dispatcher: Dispatcher
     private let registry: SourceRegistry
     private let config: FusionEventConfig
+    private let metrics: MetricsCollector
     private let version = "0.1.0"
     private let schemaVersion = 1
+    private let replayMaxLimit = 10_000
     private var startedAt: UInt64
 
     init(
@@ -15,13 +17,15 @@ actor RPCMethods {
         eventLog: EventLog,
         dispatcher: Dispatcher,
         registry: SourceRegistry,
-        config: FusionEventConfig
+        config: FusionEventConfig,
+        metrics: MetricsCollector
     ) {
         self.ruleEngine = ruleEngine
         self.eventLog = eventLog
         self.dispatcher = dispatcher
         self.registry = registry
         self.config = config
+        self.metrics = metrics
         self.startedAt = UInt64(Date().timeIntervalSince1970)
     }
 
@@ -32,6 +36,8 @@ actor RPCMethods {
         case "event.health":
             return await health(req: req)
         case "event.shutdown":
+            FusionLog.lifecycle.notice("event.shutdown RPC received, initiating graceful shutdown (D2)")
+            LifecycleHandle.instance.requestShutdown()
             return ok(req, ["ok": true])
         case "rule.add":
             return await ruleAdd(req: req)
@@ -45,6 +51,8 @@ actor RPCMethods {
             return await replay(req: req)
         case "event.dry_run":
             return await dryRun(req: req)
+        case "event.metrics":
+            return await metricsRpc(req: req)
         case "event.subscribe":
             return ok(req, ["subscribed": true])
         case "event.pong":
@@ -82,15 +90,27 @@ actor RPCMethods {
             return err(req, code: RPCErrorCode.ruleValidation.rawValue, message: "missing params")
         }
         guard let name = value["rule_name"] as? String,
+              name.count > 0, name.count <= 256,
               let typeStr = value["event_type"] as? String,
               let type = SystemEventType(rawValue: typeStr),
-              let agent = value["target_agent"] as? String else {
+              let agent = value["target_agent"] as? String,
+              agent.count > 0, agent.count <= 256 else {
             return err(req, code: RPCErrorCode.ruleValidation.rawValue, message: "invalid rule fields")
+        }
+        let pathPattern = value["path_pattern"] as? String
+        if let pp = pathPattern {
+            if pp.count > 4096 {
+                return err(req, code: RPCErrorCode.ruleValidation.rawValue, message: "path_pattern too long (>4096) (S4)")
+            }
+            let badChars = pp.unicodeScalars.filter { $0.value < 0x20 && $0 != "\n" && $0 != "\t" }
+            if !badChars.isEmpty {
+                return err(req, code: RPCErrorCode.ruleValidation.rawValue, message: "path_pattern contains control chars (S4)")
+            }
         }
         let rule = EventRule(
             ruleName: name,
             eventType: type,
-            pathPattern: value["path_pattern"] as? String,
+            pathPattern: pathPattern,
             debounceMs: value["debounce_ms"] as? Int ?? 0,
             throttleMs: value["throttle_ms"] as? Int ?? 0,
             throttleMaxPerWindow: value["throttle_max_per_window"] as? Int ?? 1,
@@ -138,7 +158,7 @@ actor RPCMethods {
             return err(req, code: RPCErrorCode.ruleValidation.rawValue, message: "missing params")
         }
         let sinceTs = UInt64((value["since_ts"] as? Int) ?? 0)
-        let limit = (value["limit"] as? Int) ?? 100
+        let limit = min((value["limit"] as? Int) ?? 100, replayMaxLimit)
         let entries = await eventLog.replay(sinceTs: sinceTs, limit: limit)
         let enc = JSONEncoder()
         let data = (try? enc.encode(entries)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
@@ -150,7 +170,7 @@ actor RPCMethods {
             return err(req, code: RPCErrorCode.ruleValidation.rawValue, message: "missing params")
         }
         let sinceTs = UInt64((value["since_ts"] as? Int) ?? 0)
-        let limit = (value["limit"] as? Int) ?? 100
+        let limit = min((value["limit"] as? Int) ?? 100, replayMaxLimit)
         let entries = await eventLog.replay(sinceTs: sinceTs, limit: limit)
         var out: [[String: AnyCodable]] = []
         for e in entries {
@@ -181,6 +201,21 @@ actor RPCMethods {
         let enc = JSONEncoder()
         let data = (try? enc.encode(out)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         return ok(req, ["events": AnyCodable(data)])
+    }
+
+    private func metricsRpc(req: RPCRequest) async -> RPCResponse {
+        var snap = await metrics.snapshot()
+        let src = await registry.health()
+        var evCounts: [String: UInt64] = [:]
+        if let srcDict = src as? [String: Any] {
+            for (k, v) in srcDict {
+                if let inner = v as? [String: Any], let total = inner["events_total"] as? UInt64 {
+                    evCounts[k] = total
+                }
+            }
+        }
+        snap["source_events"] = AnyCodable(evCounts)
+        return ok(req, ["ok": true, "metrics": AnyCodable(snap)])
     }
 
     private func ok(_ req: RPCRequest, _ result: [String: Any]) -> RPCResponse {

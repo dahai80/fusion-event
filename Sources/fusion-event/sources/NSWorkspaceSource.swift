@@ -87,9 +87,10 @@ public actor NSWorkspaceSource: EventSource {
     }
 
     private func publishProcess(_ snap: ProcessSnap) async {
-        await registry.tickCount(.processTerminated)
+        let et: SystemEventType = snap.isLaunch ? .processLaunched : .processTerminated
+        await registry.tickCount(et)
         await bus?.publish(RawEvent(
-            sourceType: .processTerminated,
+            sourceType: et,
             targetPath: snap.execPath,
             timestamp: snap.timestamp,
             payload: [

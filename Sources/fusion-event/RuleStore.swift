@@ -8,7 +8,7 @@ actor RuleStore {
     private nonisolated(unsafe) var closeHandle: OpaquePointer?
     private let dbPath: String
     private let nodeId: String
-    private var checkpointTask: Task<Void, Never>?
+    private nonisolated(unsafe) var checkpointTask: Task<Void, Never>?
     private let checkpointIntervalSec: Int
 
     init(dbPath: String, nodeId: String, checkpointIntervalSec: Int = 300) {
@@ -29,7 +29,7 @@ actor RuleStore {
         self.db = handle
         self.closeHandle = handle
         sqlite3_exec(handle, "PRAGMA journal_mode=WAL;", nil, nil, nil)
-        sqlite3_exec(handle, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
+        sqlite3_exec(handle, "PRAGMA synchronous=FULL;", nil, nil, nil)
         let ddl = """
         CREATE TABLE IF NOT EXISTS rules (
             rule_name      TEXT PRIMARY KEY,
@@ -60,7 +60,17 @@ actor RuleStore {
             FusionLog.persist.info("rulestore ready \(dbPath, privacy: .public)")
         }
         runMigrations(handle: handle)
-        startCheckpoint()
+        if checkpointIntervalSec > 0 {
+            let interval = UInt64(checkpointIntervalSec) * 1_000_000_000
+            checkpointTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: interval)
+                    if Task.isCancelled { break }
+                    await self?.checkpoint()
+                }
+            }
+            FusionLog.persist.info("rulestore wal checkpoint every \(checkpointIntervalSec)s (R5, F-PERSIST-2: task assigned+cancellable)")
+        }
     }
 
     private nonisolated func runMigrations(handle: OpaquePointer?) {
@@ -78,7 +88,7 @@ actor RuleStore {
             let sql: String
         }
         let migrations: [Migration] = [
-            Migration(version: 1, sql: "ALTER TABLE rules ADD COLUMN throttle_max_per_window INTEGER DEFAULT 1;")
+            Migration(version: 1, sql: "CREATE INDEX IF NOT EXISTS idx_rules_type_v1 ON rules(event_type);")
         ]
         var applied: Int32 = currentVersion
         for m in migrations {
@@ -98,19 +108,6 @@ actor RuleStore {
         if applied != currentVersion {
             FusionLog.persist.info("rulestore schema at v\(applied)")
         }
-    }
-
-    private nonisolated func startCheckpoint() {
-        guard checkpointIntervalSec > 0 else { return }
-        let interval = UInt64(checkpointIntervalSec) * 1_000_000_000
-        Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: interval)
-                if Task.isCancelled { break }
-                await self?.checkpoint()
-            }
-        }
-        FusionLog.persist.info("rulestore wal checkpoint every \(self.checkpointIntervalSec)s (R5)")
     }
 
     private func checkpoint() {
@@ -253,7 +250,10 @@ actor RuleStore {
         sqlite3_bind_text(stmt, 1, ruleName, -1, SQLITE_TRANSIENT)
         sqlite3_bind_int64(stmt, 2, Int64(lastFireTs))
         sqlite3_bind_text(stmt, 3, nodeId, -1, SQLITE_TRANSIENT)
-        sqlite3_step(stmt)
+        let rc = sqlite3_step(stmt)
         sqlite3_finalize(stmt)
+        if rc != SQLITE_DONE {
+            FusionLog.persist.error("rulestore saveDebounceState step fail rc=\(rc) rule=\(ruleName, privacy: .public)")
+        }
     }
 }

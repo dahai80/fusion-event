@@ -89,4 +89,12 @@ final class LifecycleHandle: @unchecked Sendable {
 
         FusionLog.lifecycle.info("signal handlers installed (SIGTERM/SIGINT via DispatchSource, L1)")
     }
+
+    func requestShutdown() {
+        guard let lc = getShared() else {
+            FusionLog.lifecycle.error("shutdown requested but lifecycle nil")
+            return
+        }
+        Task { await lc.gracefulShutdown() }
+    }
 }

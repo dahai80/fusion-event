@@ -12,6 +12,7 @@ public actor FSEventsSource: EventSource {
     private let runLoop = DispatchQueue(label: "fusion-event.fsevents")
     private var batchBuffer: [String: UInt32] = [:]
     private var batchTask: Task<Void, Never>?
+    private let batchHardCap: Int = 8192
 
     public init(watchPaths: [String], latencySec: Double, bus: EventBus, registry: SourceRegistry) {
         self.watchPaths = watchPaths
@@ -21,6 +22,10 @@ public actor FSEventsSource: EventSource {
     }
 
     public func start() async {
+        guard stream == nil else {
+            FusionLog.source.notice("fsevents already started, skip duplicate (F-1: start idempotent)")
+            return
+        }
         let roots = self.watchPaths.filter { FileManager.default.fileExists(atPath: $0) }
         guard !roots.isEmpty else {
             FusionLog.source.notice("fsevents no valid watch paths (R1): file events disabled — configure fsevents_watch_paths to enable; whole-home-dir watch removed to avoid flood")
@@ -30,7 +35,6 @@ public actor FSEventsSource: EventSource {
         let unmanaged = Unmanaged<FSEventsSource>.passRetained(self)
         let ptr = unmanaged.toOpaque()
         context.info = ptr
-        infoPtr = ptr
         let flags: FSEventStreamCreateFlags = UInt32(kFSEventStreamCreateFlagFileEvents) | UInt32(kFSEventStreamCreateFlagNoDefer)
         let streamRef = FSEventStreamCreate(
             kCFAllocatorDefault,
@@ -38,16 +42,16 @@ public actor FSEventsSource: EventSource {
                 guard let info else { return }
                 let me = Unmanaged<FSEventsSource>.fromOpaque(info).takeUnretainedValue()
                 let pathCount = Int(numEvents)
-                let paths: [String] = eventPaths.withMemoryRebound(to: UnsafePointer<CChar>?.self, capacity: pathCount) { ptr in
-                    (0..<pathCount).compactMap { i -> String? in
-                        guard let cstr = ptr[i] else { return nil }
-                        return String(cString: cstr)
+                var pairs: [(path: String, flag: UInt32)] = []
+                eventPaths.withMemoryRebound(to: UnsafePointer<CChar>?.self, capacity: pathCount) { pp in
+                    eventFlags.withMemoryRebound(to: UInt32.self, capacity: pathCount) { fp in
+                        for i in 0..<pathCount {
+                            guard let cstr = pp[i] else { continue }
+                            pairs.append((String(cString: cstr), fp[i]))
+                        }
                     }
                 }
-                let flags: [UInt32] = eventFlags.withMemoryRebound(to: UInt32.self, capacity: pathCount) { ptr in
-                    (0..<pathCount).map { ptr[$0] }
-                }
-                Task { await me.handleEvents(paths: paths, flags: flags) }
+                Task { await me.handleEvents(pairs: pairs) }
             },
             &context,
             roots as CFArray,
@@ -57,14 +61,18 @@ public actor FSEventsSource: EventSource {
         )
         guard let streamRef else {
             FusionLog.source.error("fsevents stream create fail")
+            Unmanaged<FSEventsSource>.fromOpaque(ptr).release()
             return
         }
         FSEventStreamSetDispatchQueue(streamRef, runLoop)
         if !FSEventStreamStart(streamRef) {
             FusionLog.source.error("fsevents stream start fail")
+            FSEventStreamRelease(streamRef)
+            Unmanaged<FSEventsSource>.fromOpaque(ptr).release()
             return
         }
         stream = streamRef
+        infoPtr = ptr
         startBatchFlush()
         FusionLog.source.info("fsevents watch \(roots.count) paths latency=\(self.latencySec)s (R1: whitelist, no whole-home-dir)")
     }
@@ -82,10 +90,12 @@ public actor FSEventsSource: EventSource {
 
     private func flushBatch() async {
         guard !batchBuffer.isEmpty else { return }
+        let snapshot = batchBuffer
+        batchBuffer.removeAll()
         let now = UInt64(Date().timeIntervalSince1970 * 1000)
-        let count = UInt64(batchBuffer.count)
+        let count = UInt64(snapshot.count)
         await registry.tickCountN(.fileModified, n: count)
-        for (path, flag) in batchBuffer {
+        for (path, flag) in snapshot {
             let event = RawEvent(
                 sourceType: .fileModified,
                 targetPath: path,
@@ -95,12 +105,12 @@ public actor FSEventsSource: EventSource {
             )
             await bus?.publish(event)
         }
-        batchBuffer.removeAll()
     }
 
     public func stop() async {
         batchTask?.cancel()
         batchTask = nil
+        await flushBatch()
         if let stream {
             FSEventStreamStop(stream)
             FSEventStreamInvalidate(stream)
@@ -114,12 +124,12 @@ public actor FSEventsSource: EventSource {
         FusionLog.source.info("fsevents stop")
     }
 
-    private func handleEvents(paths: [String], flags: [UInt32]) async {
-        for (i, path) in paths.enumerated() {
-            let flag = flags[i]
-            batchBuffer[path] = flag
+    private func handleEvents(pairs: [(path: String, flag: UInt32)]) async {
+        for pair in pairs {
+            batchBuffer[pair.path] = pair.flag
         }
-        if batchBuffer.count > 4096 {
+        if batchBuffer.count > batchHardCap {
+            FusionLog.source.notice("fsevents batch hard cap \(self.batchHardCap), flush now (P4-4: bounded)")
             await flushBatch()
         }
     }

@@ -9,7 +9,7 @@ public actor Dispatcher: TriggerSink {
     private var pendingQueue: [TriggerSignal] = []
     private var recentKeys: [String: (taskId: String, expiryTs: UInt64)] = [:]
     private var recentKeyOrder: [String] = []
-    private let keyTtlMs: UInt64 = 60_000
+    private var keyTtlMs: UInt64 = 60_000
     private let keyMaxEntries: Int = 10_000
     private let queueMax: Int
     private var client: UDSClient?
@@ -25,6 +25,8 @@ public actor Dispatcher: TriggerSink {
     private var pressureActive: Bool = false
     private var pressureObservers: [@Sendable () async -> Void] = []
     private var shuttingDown = false
+    private var monotonicClock: UInt64 = 0
+    private var metrics: MetricsCollector?
 
     init(
         sockPath: String,
@@ -48,6 +50,10 @@ public actor Dispatcher: TriggerSink {
         self.contextBridge = context
     }
 
+    public func setMetrics(_ m: MetricsCollector) {
+        self.metrics = m
+    }
+
     public func observeBackpressure(_ handler: @escaping @Sendable () async -> Void) {
         pressureObservers.append(handler)
     }
@@ -57,14 +63,26 @@ public actor Dispatcher: TriggerSink {
         pressureActive = active
         let level = active ? "HIGH" : "NORMAL"
         FusionLog.bridge.notice("backpressure \(level) queue=\(self.pendingQueue.count)/\(self.queueMax) tokens=\(self.availableTokens)/\(self.tokenBucketMax) (A10)")
+        let now = nowMs()
+        let metricsRef = metrics
+        if active {
+            Task { await metricsRef?.markPressureHigh(now: now) }
+        } else {
+            Task { await metricsRef?.markPressureNormal(now: now) }
+        }
         let observers = pressureObservers
         Task {
             for h in observers { await h() }
         }
     }
 
+    private func nowMs() -> UInt64 {
+        monotonicClock = max(monotonicClock + 1, UInt64(Date().timeIntervalSince1970 * 1000))
+        return monotonicClock
+    }
+
     public func onTrigger(_ signal: TriggerSignal) async {
-        let now = UInt64(Date().timeIntervalSince1970 * 1000)
+        let now = nowMs()
         purgeExpiredKeys(now: now)
         if recentKeys[signal.idempotencyKey] != nil {
             FusionLog.bridge.notice("duplicate trigger suppressed idem=\(signal.idempotencyKey, privacy: .public) (H1)")
@@ -79,7 +97,14 @@ public actor Dispatcher: TriggerSink {
             if pendingQueue.count >= queueMax {
                 let dropped = pendingQueue.removeFirst()
                 droppedCount += 1
-                FusionLog.bridge.error("trigger queue overflow (max \(self.queueMax)), drop oldest \(dropped.triggerId, privacy: .public)")
+                await metrics?.recordTriggerDropped()
+                FusionLog.bridge.error("trigger queue overflow (max \(self.queueMax)), drop oldest \(dropped.triggerId, privacy: .public) (F-DROP-1: persist)")
+                outbox.enqueue(signal: dropped)
+                await eventLog.recordTrigger(
+                    triggerId: dropped.triggerId, taskId: nil,
+                    idempotencyKey: dropped.idempotencyKey, event: dropped.event,
+                    matchedRules: [dropped.rule.ruleName]
+                )
             }
             pendingQueue.append(signal)
             FusionLog.bridge.notice("trigger queue backlog, \(self.pendingQueue.count, privacy: .public) waiting (R1)")
@@ -102,10 +127,13 @@ public actor Dispatcher: TriggerSink {
             FusionLog.bridge.error("auditBridge nil, skip \(signal.triggerId)")
             return
         }
+        let auditStart = nowMs()
         let outcome = await audit.audit(signal: signal)
+        await metrics?.recordLatency(bridge: "guard", ms: nowMs() - auditStart)
         switch outcome {
         case .block(let res):
             blockedCount += 1
+            await metrics?.recordTriggerBlocked()
             FusionLog.bridge.notice("guard block \(signal.triggerId, privacy: .public): \(res.reason)")
             occupyKey(signal.idempotencyKey, taskId: "blocked", now: now)
             await eventLog.recordTrigger(
@@ -113,9 +141,11 @@ public actor Dispatcher: TriggerSink {
                 idempotencyKey: signal.idempotencyKey, event: signal.event,
                 matchedRules: [signal.rule.ruleName]
             )
+            outbox.dequeue(triggerId: signal.triggerId)
             return
         case .failClosed(let reason):
             blockedCount += 1
+            await metrics?.recordTriggerBlocked()
             FusionLog.bridge.error("fail-closed \(signal.triggerId, privacy: .public): \(reason)")
             occupyKey(signal.idempotencyKey, taskId: "failclosed", now: now)
             await eventLog.recordTrigger(
@@ -123,15 +153,19 @@ public actor Dispatcher: TriggerSink {
                 idempotencyKey: signal.idempotencyKey, event: signal.event,
                 matchedRules: [signal.rule.ruleName]
             )
+            outbox.dequeue(triggerId: signal.triggerId)
             return
         case .pass, .degradedFailOpen, .challenge:
             break
         }
+        let ctxStart = nowMs()
         let ctx = await contextBridge?.retrieveContext(signal: signal) ?? ContextResult(context: "", memoryIds: [], cacheHit: false, contextStale: false)
+        await metrics?.recordLatency(bridge: "memory", ms: nowMs() - ctxStart)
         await submitTask(signal: signal, context: ctx, now: now)
     }
 
     private func submitTask(signal: TriggerSignal, context: ContextResult, now: UInt64) async {
+        let submitStart = nowMs()
         let input: [String: Any] = [
             "trigger_id": signal.triggerId,
             "event": eventDict(signal.event),
@@ -152,7 +186,9 @@ public actor Dispatcher: TriggerSink {
             "idempotency_key": signal.idempotencyKey
         ]
         let req = RPCRequest(method: "task.submit", params: AnyCodable(params), id: .int(Int.random(in: 1...Int.max)))
-        outbox.enqueue(signal: signal)
+        if !outbox.exists(triggerId: signal.triggerId) {
+            outbox.enqueue(signal: signal)
+        }
         let maxRetries = max(0, signal.rule.maxRetries)
         var attempt = 0
         while true {
@@ -164,6 +200,9 @@ public actor Dispatcher: TriggerSink {
                 }
                 occupyKey(signal.idempotencyKey, taskId: taskId ?? "unknown", now: now)
                 submittedCount += 1
+                await metrics?.recordTriggerSubmitted()
+                await metrics?.recordLatency(bridge: "dispatch", ms: nowMs() - submitStart)
+                await metrics?.setOutboxBacklog(outbox.pendingCount())
                 outbox.dequeue(triggerId: signal.triggerId)
                 FusionLog.bridge.info("task.submit ok trigger=\(signal.triggerId, privacy: .public) task=\(taskId ?? "?") idem=\(signal.idempotencyKey, privacy: .public)")
                 await eventLog.recordTrigger(
@@ -178,13 +217,17 @@ public actor Dispatcher: TriggerSink {
                 if attempt < maxRetries && isRetryable(err) {
                     attempt += 1
                     retriedCount += 1
+                    await metrics?.recordTriggerRetried()
                     let backoffNs = UInt64(min(500 * Int(pow(2.0, Double(attempt - 1))), 4000)) * 1_000_000
                     FusionLog.bridge.notice("task.submit retry attempt=\(attempt)/\(maxRetries) trigger=\(signal.triggerId) backoff=\(backoffNs / 1_000_000)ms (E6: maxRetries honored)")
                     try? await Task.sleep(nanoseconds: backoffNs)
                     continue
                 }
                 failedCount += 1
+                await metrics?.recordTriggerFailed()
+                await metrics?.setOutboxBacklog(outbox.pendingCount())
                 outbox.markFailed(triggerId: signal.triggerId, error: "\(err)")
+                occupyKey(signal.idempotencyKey, taskId: "failed", now: now)
                 switch err {
                 case .connectionFailed:
                     FusionLog.bridge.error("task.submit fail agent-studio not running, retries exhausted trigger=\(signal.triggerId)")
@@ -201,7 +244,10 @@ public actor Dispatcher: TriggerSink {
                 return
             } catch {
                 failedCount += 1
+                await metrics?.recordTriggerFailed()
+                await metrics?.setOutboxBacklog(outbox.pendingCount())
                 outbox.markFailed(triggerId: signal.triggerId, error: "\(error)")
+                occupyKey(signal.idempotencyKey, taskId: "failed", now: now)
                 FusionLog.bridge.error("task.submit unknown error, retries exhausted trigger=\(signal.triggerId)")
                 return
             }
@@ -229,9 +275,10 @@ public actor Dispatcher: TriggerSink {
     }
 
     private func occupyKey(_ key: String, taskId: String, now: UInt64) {
-        if recentKeys[key] == nil {
-            recentKeyOrder.append(key)
+        if recentKeys[key] != nil {
+            recentKeyOrder.removeAll { $0 == key }
         }
+        recentKeyOrder.append(key)
         recentKeys[key] = (taskId, now + keyTtlMs)
         if recentKeys.count > keyMaxEntries {
             let evictKey = recentKeyOrder.removeFirst()
@@ -244,10 +291,12 @@ public actor Dispatcher: TriggerSink {
         for (k, v) in recentKeys where v.expiryTs <= now {
             expired.append(k)
         }
+        guard !expired.isEmpty else { return }
+        let expiredSet = Set(expired)
         for k in expired {
             recentKeys.removeValue(forKey: k)
-            recentKeyOrder.removeAll { $0 == k }
         }
+        recentKeyOrder.removeAll { expiredSet.contains($0) }
     }
 
     private func resetClient() async {
@@ -267,7 +316,7 @@ public actor Dispatcher: TriggerSink {
 
     private func ensureClient() -> UDSClient {
         if let c = client { return c }
-        let c = UDSClient(sockPath: sockPath)
+        let c = UDSClient(sockPath: sockPath, timeoutSec: timeoutSec)
         client = c
         return c
     }
@@ -276,7 +325,8 @@ public actor Dispatcher: TriggerSink {
         shuttingDown = true
         let pending = pendingQueue
         pendingQueue.removeAll()
-        let deadline = UInt64(Date().timeIntervalSince1970) + UInt64(timeoutSec)
+        let startWall = UInt64(Date().timeIntervalSince1970)
+        let deadline = startWall + UInt64(timeoutSec)
         if !pending.isEmpty {
             FusionLog.bridge.notice("shutdown drain: \(pending.count) pending triggers, attempting submit within \(timeoutSec)s (R10: hard timeout)")
         }
@@ -286,14 +336,14 @@ public actor Dispatcher: TriggerSink {
                 FusionLog.bridge.error("shutdown timeout reached, \(drained) drained, persisting rest to outbox (R10)")
                 break
             }
-            await eventLog.recordTrigger(
-                triggerId: sig.triggerId, taskId: nil,
-                idempotencyKey: sig.idempotencyKey, event: sig.event,
-                matchedRules: [sig.rule.ruleName]
-            )
+            await submitTask(signal: sig, context: ContextResult(context: "", memoryIds: [], cacheHit: false, contextStale: false), now: nowMs())
             drained += 1
         }
-        outbox.persistPending(pending: pending)
+        var rest: [TriggerSignal] = []
+        for sig in pending where !outbox.exists(triggerId: sig.triggerId) && recentKeys[sig.idempotencyKey] == nil {
+            rest.append(sig)
+        }
+        outbox.persistPending(pending: rest)
         await client?.close()
         client = nil
         FusionLog.bridge.notice("shutdown drain done, outbox entries=\(self.outbox.pendingCount()) (R4: crash-safe replay)")
@@ -304,7 +354,7 @@ public actor Dispatcher: TriggerSink {
         guard !pending.isEmpty else { return }
         FusionLog.bridge.notice("replaying \(pending.count) outbox triggers on restart (R4)")
         for sig in pending {
-            let now = UInt64(Date().timeIntervalSince1970 * 1000)
+            let now = nowMs()
             purgeExpiredKeys(now: now)
             if recentKeys[sig.idempotencyKey] != nil {
                 outbox.dequeue(triggerId: sig.triggerId)
@@ -312,7 +362,14 @@ public actor Dispatcher: TriggerSink {
                 continue
             }
             await runTriggerChain(signal: sig, now: now)
-            outbox.dequeue(triggerId: sig.triggerId)
+            let occupied = recentKeys[sig.idempotencyKey]
+            if let occ = occupied, occ.taskId == "failed" {
+                FusionLog.bridge.error("outbox trigger \(sig.triggerId) replay failed, keep for next restart (F-CRASH-2: no unconditional delete)")
+                recentKeys.removeValue(forKey: sig.idempotencyKey)
+                recentKeyOrder.removeAll { $0 == sig.idempotencyKey }
+            } else if occupied != nil {
+                outbox.dequeue(triggerId: sig.triggerId)
+            }
         }
     }
 
@@ -337,11 +394,27 @@ final class DispatcherOutbox: @unchecked Sendable {
         return "\(queueDir)/\(safe).json"
     }
 
+    private func writeAtomic(_ data: Data, to path: String) {
+        do {
+            try data.write(to: URL(fileURLWithPath: path), options: [.atomic])
+            if let fh = try? FileHandle(forUpdating: URL(fileURLWithPath: path)) {
+                try? fh.synchronize()
+                try? fh.close()
+            }
+        } catch {
+            FusionLog.bridge.error("outbox atomic write fail \(path, privacy: .public): \(error)")
+        }
+    }
+
+    func exists(triggerId: String) -> Bool {
+        FileManager.default.fileExists(atPath: pathFor(triggerId))
+    }
+
     func enqueue(signal: TriggerSignal) {
         let p = pathFor(signal.triggerId)
         let enc = JSONEncoder()
         if let data = try? enc.encode(signal) {
-            try? data.write(to: URL(fileURLWithPath: p))
+            writeAtomic(data, to: p)
             FusionLog.bridge.debug("outbox enqueue \(signal.triggerId, privacy: .public)")
         }
     }
@@ -352,12 +425,12 @@ final class DispatcherOutbox: @unchecked Sendable {
 
     func markAttempted(triggerId: String, error: String) {
         let p = pathFor(triggerId) + ".attempt"
-        try? error.data(using: .utf8)?.write(to: URL(fileURLWithPath: p))
+        if let data = error.data(using: .utf8) { writeAtomic(data, to: p) }
     }
 
     func markFailed(triggerId: String, error: String) {
         let p = pathFor(triggerId) + ".failed"
-        try? error.data(using: .utf8)?.write(to: URL(fileURLWithPath: p))
+        if let data = error.data(using: .utf8) { writeAtomic(data, to: p) }
         FusionLog.bridge.error("outbox trigger \(triggerId) failed persist, awaiting replay")
     }
 
@@ -367,7 +440,7 @@ final class DispatcherOutbox: @unchecked Sendable {
             if !FileManager.default.fileExists(atPath: p) {
                 let enc = JSONEncoder()
                 if let data = try? enc.encode(sig) {
-                    try? data.write(to: URL(fileURLWithPath: p))
+                    writeAtomic(data, to: p)
                 }
             }
         }

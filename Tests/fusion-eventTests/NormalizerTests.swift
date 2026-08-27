@@ -50,12 +50,29 @@ final class NormalizerTests: XCTestCase {
     }
 
     func testKeyDiffersForDifferentRuleOrPath() {
-        let rule = makeRule(debounceMs: 200)
-        let k1 = Normalizer.computeIdempotencyKey(ruleName: "r1", eventType: .fileModified, targetPath: "/x/a.swift", bucket: 1)
-        let k2 = Normalizer.computeIdempotencyKey(ruleName: "r2", eventType: .fileModified, targetPath: "/x/a.swift", bucket: 1)
-        let k3 = Normalizer.computeIdempotencyKey(ruleName: "r1", eventType: .fileModified, targetPath: "/x/b.swift", bucket: 1)
+        let k1 = Normalizer.computeIdempotencyKey(ruleName: "r1", eventType: .fileModified, nodeId: "n1", targetPath: "/x/a.swift", bucket: 1)
+        let k2 = Normalizer.computeIdempotencyKey(ruleName: "r2", eventType: .fileModified, nodeId: "n1", targetPath: "/x/a.swift", bucket: 1)
+        let k3 = Normalizer.computeIdempotencyKey(ruleName: "r1", eventType: .fileModified, nodeId: "n1", targetPath: "/x/b.swift", bucket: 1)
         XCTAssertNotEqual(k1, k2)
         XCTAssertNotEqual(k1, k3)
+    }
+
+    func testKeyDiffersAcrossNodesSameFileBucket() {
+        let kA = Normalizer.computeIdempotencyKey(ruleName: "r1", eventType: .fileModified, nodeId: "node-A", targetPath: "/x/a.swift", bucket: 1)
+        let kB = Normalizer.computeIdempotencyKey(ruleName: "r1", eventType: .fileModified, nodeId: "node-B", targetPath: "/x/a.swift", bucket: 1)
+        XCTAssertNotEqual(kA, kB, "F-IDEM-1: cross-node same file/bucket must not suppress each other")
+    }
+
+    func testKeyStableSameNodeFileBucket() {
+        let a = Normalizer.computeIdempotencyKey(ruleName: "r1", eventType: .fileModified, nodeId: "node-A", targetPath: "/x/a.swift", bucket: 1)
+        let b = Normalizer.computeIdempotencyKey(ruleName: "r1", eventType: .fileModified, nodeId: "node-A", targetPath: "/x/a.swift", bucket: 1)
+        XCTAssertEqual(a, b, "same node/file/bucket key stable")
+    }
+
+    func testKeyDelimiterCollisionSafe() {
+        let a = Normalizer.computeIdempotencyKey(ruleName: "r|1", eventType: .fileModified, nodeId: "n", targetPath: "x", bucket: 1)
+        let b = Normalizer.computeIdempotencyKey(ruleName: "r", eventType: .fileModified, nodeId: "1|n", targetPath: "x", bucket: 1)
+        XCTAssertNotEqual(a, b, "F-IDEM-1: delimiter collision must not collapse distinct fields")
     }
 
     func testTriggerIdUniquePerCall() {

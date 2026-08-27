@@ -2,6 +2,7 @@ import Foundation
 
 public enum SystemEventType: String, Codable, Sendable {
     case fileModified
+    case processLaunched
     case processTerminated
     case clipboardChanged
     case networkStatusChanged

@@ -12,14 +12,16 @@ actor IPCServer {
     private var heartbeatTask: Task<Void, Never>?
     private let bus: EventBus
     private let maxLineBytes: Int = 1_048_576
+    private let nodeId: String
 
-    init(sockPath: String, methods: RPCMethods, bus: EventBus, heartbeatSec: Int, deadSec: Int) {
+    init(sockPath: String, methods: RPCMethods, bus: EventBus, heartbeatSec: Int, deadSec: Int, nodeId: String) {
         self.sockPath = sockPath
         self.methods = methods
         self.bus = bus
         self.heartbeatSec = heartbeatSec
         self.deadSec = deadSec
         self.allowedUid = getuid()
+        self.nodeId = nodeId
     }
 
     func start() async {
@@ -114,6 +116,8 @@ actor IPCServer {
     private func isRunning() -> Bool { running }
 
     private func registerConn(fd: Int32) {
+        var nosig: Int32 = 1
+        _ = Darwin.setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosig, socklen_t(MemoryLayout<Int32>.size))
         connections[fd] = ClientConn(fd: fd)
     }
 
@@ -182,7 +186,7 @@ actor IPCServer {
             let closed = await isConnClosed(fd: fdLocal)
             guard closed == false else { break }
             let note = RPCNotification(method: "event.notification", params: AnyCodable([
-                "event": Self.eventDict(event),
+                "event": eventDict(event),
                 "source": event.sourceType.rawValue
             ] as [String: Any]))
             let data = RPCCodec.line(RPCCodec.encode(note))
@@ -200,16 +204,35 @@ actor IPCServer {
     private nonisolated func processLine(fd: Int32, data: Data) async {
         await touchConn(fd: fd)
         guard !data.isEmpty else { return }
-        guard let req = RPCCodec.decodeRequest(data) else {
-            let err = RPCResponse(id: nil, result: nil, error: RPCError(code: RPCErrorCode.parseError.rawValue, message: "parse error"))
-            await Self.writeAll(fd: fd, data: RPCCodec.line(RPCCodec.encode(err)))
-            return
+        switch RPCCodec.decodeBatch(data) {
+        case .malformed:
+            let errResp = RPCResponse(id: nil, result: nil, error: RPCError(code: RPCErrorCode.parseError.rawValue, message: "parse error"))
+            await Self.writeAll(fd: fd, data: RPCCodec.line(RPCCodec.encode(errResp)))
+        case .single(let req):
+            if req.method == "event.pong" {
+                await touchConn(fd: fd)
+                return
+            }
+            let resp = await methods.dispatch(req: req)
+            if req.id == nil {
+                return
+            }
+            await Self.writeAll(fd: fd, data: RPCCodec.line(RPCCodec.encode(resp)))
+        case .batch(let reqs):
+            var responses: [RPCResponse] = []
+            for req in reqs {
+                if req.method == "event.pong" {
+                    await touchConn(fd: fd)
+                    continue
+                }
+                let resp = await methods.dispatch(req: req)
+                if req.id != nil {
+                    responses.append(resp)
+                }
+            }
+            guard !responses.isEmpty else { return }
+            await Self.writeAll(fd: fd, data: RPCCodec.line(RPCCodec.encode(responses)))
         }
-        if req.method == "event.pong" {
-            return
-        }
-        let resp = await methods.dispatch(req: req)
-        await Self.writeAll(fd: fd, data: RPCCodec.line(RPCCodec.encode(resp)))
     }
 
     private func touchConn(fd: Int32) {
@@ -232,14 +255,14 @@ actor IPCServer {
         return true
     }
 
-    private nonisolated static func eventDict(_ e: RawEvent) -> [String: Any] {
+    private nonisolated func eventDict(_ e: RawEvent) -> [String: Any] {
         [
             "eventId": UUID().uuidString,
             "type": e.sourceType.rawValue,
             "targetPath": e.targetPath ?? "",
             "timestamp": e.timestamp,
             "payload": e.payload,
-            "nodeId": ""
+            "nodeId": nodeId
         ]
     }
 
@@ -257,15 +280,26 @@ actor IPCServer {
         let now = UInt64(Date().timeIntervalSince1970)
         let note = RPCNotification(method: "event.heartbeat", params: AnyCodable(["ts": now]))
         let data = RPCCodec.line(RPCCodec.encode(note))
+        let snapshot = connections
+        let deadSecLocal = UInt64(deadSec)
+        let writeResults = await withTaskGroup(of: (Int32, Bool).self) { group in
+            for (fd, _) in snapshot {
+                group.addTask { await (fd, Self.writeAll(fd: fd, data: data)) }
+            }
+            var res: [(Int32, Bool)] = []
+            for await r in group { res.append(r) }
+            return res
+        }
         var dead: [Int32] = []
-        for (fd, conn) in connections {
-            let ok = await Self.writeAll(fd: fd, data: data)
-            if !ok || now - conn.lastSeen > UInt64(deadSec) {
+        let writeOk: [Int32: Bool] = Dictionary(uniqueKeysWithValues: writeResults)
+        for (fd, conn) in snapshot {
+            let ok = writeOk[fd] ?? false
+            if !ok || now - conn.lastSeen > deadSecLocal {
                 dead.append(fd)
             }
         }
         for fd in dead {
-            FusionLog.ipc.notice("ipc dead/closed connection fd=\(fd), cleanup (E6)")
+            FusionLog.ipc.notice("ipc dead/closed connection fd=\(fd), cleanup (E6, F-15: non-blocking heartbeat sweep)")
             if let conn = connections[fd] {
                 conn.cont?.finish()
                 conn.markClosed()

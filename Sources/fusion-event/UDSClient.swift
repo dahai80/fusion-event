@@ -8,11 +8,13 @@ enum UDSClientError: Error, Equatable {
 
 actor UDSClient {
     private let sockPath: String
+    private let timeoutSec: Int
     private var fd: Int32 = -1
     private var poisoned: Bool = false
 
-    init(sockPath: String) {
+    init(sockPath: String, timeoutSec: Int = 5) {
         self.sockPath = sockPath
+        self.timeoutSec = max(1, timeoutSec)
     }
 
     func connect() throws {
@@ -42,7 +44,7 @@ actor UDSClient {
         }
         var nosig: Int32 = 1
         _ = Darwin.setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosig, socklen_t(MemoryLayout<Int32>.size))
-        var tv = timeval(tv_sec: 5, tv_usec: 0)
+        var tv = timeval(tv_sec: Int(timeoutSec), tv_usec: 0)
         _ = Darwin.setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         _ = Darwin.setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
     }

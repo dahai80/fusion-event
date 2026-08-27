@@ -20,6 +20,20 @@ resolve_bin() {
     else echo ""; fi
 }
 
+rotate_log() {
+    local f="$LOG_FILE"
+    [[ -f "$f" ]] || return 0
+    local sz
+    sz="$(stat -f%z "$f" 2>/dev/null || echo 0)"
+    if [[ "$sz" -gt 10485760 ]]; then
+        for i in 3 2 1; do
+            [[ -f "$f.$i" ]] && mv "$f.$i" "$f.$((i+1))"
+        done
+        mv "$f" "$f.1"
+        echo "[rotate] $f size=${sz}B rotated (O4: log rotation)" >> "$f.1"
+    fi
+}
+
 do_start() {
     exec 9>"$DATA_DIR.lock"
     if ! flock -n 9; then
@@ -35,6 +49,10 @@ do_start() {
     fi
     [[ -z "$bin" ]] && { echo "ERROR: build failed" >&2; exit 1; }
     mkdir -p "$DATA_DIR"
+    rotate_log
+    if [[ -f "$PLIST_FILE" ]]; then
+        echo "[WARN] launchd agent installed ($PLIST_FILE) — prefer 'start.sh install' for production; nohup 'start' may race with launchd KeepAlive (O9)" >&2
+    fi
     if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
         echo "already running pid=$(cat "$PID_FILE")"
         return 0
@@ -123,14 +141,49 @@ rpc_call() {
     printf '{"jsonrpc":"2.0","method":"%s","params":%s,"id":1}\n' "$method" "$params" | nc -U -w2 "$SOCK" 2>/dev/null || echo ""
 }
 
+health_field() {
+    local json="$1"
+    local field="$2"
+    python3 -c "
+import sys, json
+try:
+    r = json.loads(sys.argv[1])
+    t = r.get('result', {})
+    if sys.argv[2] in t: print(t[sys.argv[2]])
+    else:
+        tr = t.get('triggers', {})
+        if sys.argv[2] in tr: print(tr[sys.argv[2]])
+        else: print('')
+except Exception: print('')
+" "$json" "$field" 2>/dev/null
+}
+
 do_doctor() {
-    local pass=0 fail=0
+    local pass=0 fail=0 warn=0
     if [[ -S "$SOCK" ]]; then echo "[OK] socket exists $SOCK"; ((pass++)); else echo "[FAIL] socket missing"; ((fail++)); fi
     local h
     h="$(rpc_call event.health)"
-    if echo "$h" | grep -q '"ok":true'; then echo "[OK] event.health reachable"; ((pass++)); else echo "[FAIL] event.health unreachable"; ((fail++)); fi
-    if [[ -f "$DATA_DIR/rules.db" ]]; then echo "[OK] rules.db exists"; ((pass++)); else echo "[WARN] rules.db missing (first run ok)"; fi
-    echo "doctor: pass=$pass fail=$fail"
+    local ok
+    ok="$(health_field "$h" ok)"
+    if [[ "$ok" == "True" ]]; then
+        echo "[OK] event.health reachable"; ((pass++))
+        local submitted blocked failed dropped disp_dropped
+        submitted="$(health_field "$h" submitted)"
+        blocked="$(health_field "$h" blocked)"
+        failed="$(health_field "$h" failed)"
+        dropped="$(health_field "$h" dropped)"
+        disp_dropped="$(health_field "$h" dispatch_dropped)"
+        echo "[INFO] triggers submitted=${submitted:-0} blocked=${blocked:-0} failed=${failed:-0} dropped=${dropped:-0} dispatch_dropped=${disp_dropped:-0} (O5)"
+        if [[ "${failed:-0}" != "0" ]]; then echo "[WARN] failed triggers=${failed} — check downstream agent-studio reachability"; ((warn++)); fi
+        if [[ "${dropped:-0}" != "0" || "${disp_dropped:-0}" != "0" ]]; then echo "[WARN] dropped triggers present — possible backpressure/source flood"; ((warn++)); fi
+        local pend
+        pend="$(find "$DATA_DIR/outbox" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
+        if [[ "${pend:-0}" -gt 50 ]]; then echo "[WARN] outbox backlog ${pend} files — downstream may be down, triggers queued for replay"; ((warn++)); else echo "[OK] outbox backlog ${pend:-0}"; ((pass++)); fi
+    else
+        echo "[FAIL] event.health unreachable (O10: python json parse, not grep)"; ((fail++))
+    fi
+    if [[ -f "$DATA_DIR/rules.db" ]]; then echo "[OK] rules.db exists"; ((pass++)); else echo "[WARN] rules.db missing (first run ok)"; ((warn++)); fi
+    echo "doctor: pass=$pass warn=$warn fail=$fail"
     [[ $fail -eq 0 ]]
 }
 
@@ -155,6 +208,10 @@ do_install() {
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ExitTimeOut</key>
+    <integer>15</integer>
     <key>StandardOutPath</key>
     <string>${LOG_FILE}</string>
     <key>StandardErrorPath</key>

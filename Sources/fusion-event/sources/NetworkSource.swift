@@ -35,14 +35,14 @@ public actor NetworkSource: EventSource {
     private func handlePath(_ path: NWPath) async {
         let sig = "\(String(describing: path.status))|\(path.availableInterfaces.map { $0.name }.joined(separator: ","))"
         guard sig != lastPath else { return }
-        lastPath = sig
         let now = UInt64(Date().timeIntervalSince1970 * 1000)
         let prev = lastEmitMs
         let cap = minIntervalMs
         if now - prev < cap {
-            FusionLog.source.debug("network burst throttle drop sig=\(sig, privacy: .public) delta=\(now - prev)ms (R7)")
+            FusionLog.source.debug("network burst throttle drop sig=\(sig, privacy: .public) delta=\(now - prev)ms (R7), lastPath not advanced (F-10: terminal state publishable next)")
             return
         }
+        lastPath = sig
         lastEmitMs = now
         await registry.tickCount(.networkStatusChanged)
         await bus?.publish(RawEvent(

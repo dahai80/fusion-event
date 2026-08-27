@@ -1,10 +1,12 @@
 import Foundation
+import os.lock
 @testable import fusion_event
 
 final class MockStudio: @unchecked Sendable {
     private let sockPath: String
     private var listenFd: Int32 = -1
     private var serverTask: Task<Void, Never>?
+    private let connLock = OSAllocatedUnfairLock(initialState: [Int32]())
 
     init(sockPath: String) {
         self.sockPath = sockPath
@@ -34,6 +36,7 @@ final class MockStudio: @unchecked Sendable {
             while !Task.isCancelled {
                 let cfd = Darwin.accept(lfd, nil, nil)
                 if cfd < 0 { break }
+                self?.connLock.withLock { $0.append(cfd) }
                 Task { self?.handleConn(fd: cfd) }
             }
         }
@@ -48,7 +51,11 @@ final class MockStudio: @unchecked Sendable {
             var gotLine = false
             while !gotLine {
                 let n = Darwin.recv(fd, &byte, 1, 0)
-                if n <= 0 { Darwin.close(fd); return }
+                if n <= 0 {
+                    Darwin.close(fd)
+                    self.connLock.withLock { $0.removeAll { $0 == fd } }
+                    return
+                }
                 if byte[0] == 0x0A { gotLine = true } else { buf.append(byte[0]) }
             }
             let idStr = extractId(buf)
@@ -78,6 +85,12 @@ final class MockStudio: @unchecked Sendable {
     func stop() {
         serverTask?.cancel()
         if listenFd >= 0 { Darwin.close(listenFd); listenFd = -1 }
+        let conns = connLock.withLock { fds -> [Int32] in
+            let copy = fds
+            fds.removeAll()
+            return copy
+        }
+        for fd in conns { Darwin.close(fd) }
         unlink(sockPath)
     }
 }

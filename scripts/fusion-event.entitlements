@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Hardened runtime required for notarization -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <false/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <false/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <false/>
+    <key>com.apple.security.cs.allow-jit</key>
+    <false/>
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!--
+      EndpointSecurity privileged event source.
+      BLOCKED: requires Apple application + approval for
+      com.apple.developer.endpoint-security.client entitlement.
+      Uncomment ONLY after Apple grants it; ES source stays esEnabled=false until then.
+    <key>com.apple.developer.endpoint-security.client</key>
+    <true/>
+    -->
+    <!-- System Extension (Phase-2 L3, when ES entitlement granted) -->
+    <!--
+    <key>com.apple.developer.endpoint-security.system-extension</key>
+    <true/>
+    -->
+</dict>
+</plist>

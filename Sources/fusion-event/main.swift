@@ -10,6 +10,7 @@ let ruleEngine = RuleEngine(store: store, nodeId: config.nodeId)
 let eventLog = EventLog(logPath: "\(dataDir)/events.log")
 await ruleEngine.setEventLog(eventLog)
 await ruleEngine.loadFromStore()
+let metrics = MetricsCollector()
 let dispatcher = Dispatcher(
     sockPath: config.studioSock,
     timeoutSec: config.outboundTimeoutDispatch,
@@ -26,10 +27,12 @@ let contextBridge = ContextBridge(
     cacheMaxEntries: config.contextCacheMaxEntries
 )
 await dispatcher.setBridges(audit: auditBridge, context: contextBridge)
+await dispatcher.setMetrics(metrics)
 await dispatcher.replayOutbox()
 await ruleEngine.setSink(dispatcher)
 
 let bus = EventBus(ruleEngine: ruleEngine)
+await bus.setMetrics(metrics)
 await bus.start()
 let registry = SourceRegistry()
 await registry.register(FSEventsSource(watchPaths: config.fseventsWatchPaths, latencySec: config.fseventsLatencySec, bus: bus, registry: registry))
@@ -42,11 +45,13 @@ if config.esEnabled {
 }
 let methods = RPCMethods(
     ruleEngine: ruleEngine, eventLog: eventLog,
-    dispatcher: dispatcher, registry: registry, config: config
+    dispatcher: dispatcher, registry: registry, config: config,
+    metrics: metrics
 )
 let ipc = IPCServer(
     sockPath: config.sockPath, methods: methods, bus: bus,
-    heartbeatSec: config.heartbeatIntervalSec, deadSec: config.heartbeatDeadSec
+    heartbeatSec: config.heartbeatIntervalSec, deadSec: config.heartbeatDeadSec,
+    nodeId: config.nodeId
 )
 let lifecycle = Lifecycle(registry: registry, ipc: ipc, bus: bus, dispatcher: dispatcher, shutdownTimeoutSec: config.shutdownTimeoutSec)
 

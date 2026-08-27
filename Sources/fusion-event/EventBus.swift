@@ -10,9 +10,14 @@ public actor EventBus {
     private let ingestBuffer: Int = 8192
     private var backpressureActive: Bool = false
     private var backpressureObservers: [@Sendable () async -> Void] = []
+    private var metrics: MetricsCollector?
 
     public init(ruleEngine: RuleEngine) {
         self.ruleEngine = ruleEngine
+    }
+
+    public func setMetrics(_ m: MetricsCollector) {
+        self.metrics = m
     }
 
     public func start() async {
@@ -41,6 +46,8 @@ public actor EventBus {
         if ingestInFlight > 0 { ingestInFlight -= 1 }
         if backpressureActive {
             backpressureActive = false
+            let metricsRef = metrics
+            Task { await metricsRef?.markPressureNormal(now: UInt64(Date().timeIntervalSince1970 * 1000)) }
             FusionLog.ipc.info("eventbus ingest backpressure NORMAL (A10)")
             let observers = backpressureObservers
             Task { for h in observers { await h() } }
@@ -64,17 +71,22 @@ public actor EventBus {
         guard let cont = ingestStream else {
             FusionLog.ipc.error("eventbus ingest stream nil, drop event type=\(event.sourceType.rawValue, privacy: .public)")
             ingestDroppedCount += 1
+            await metrics?.recordIngestDropped()
             return
         }
         let yielded = cont.yield(event)
         switch yielded {
         case .terminated:
             ingestDroppedCount += 1
+            await metrics?.recordIngestDropped()
             FusionLog.ipc.error("eventbus ingest stream terminated, drop event type=\(event.sourceType.rawValue, privacy: .public)")
         case .dropped:
             ingestDroppedCount += 1
+            await metrics?.recordIngestDropped()
             if !backpressureActive {
                 backpressureActive = true
+                let metricsRef = metrics
+                Task { await metricsRef?.markPressureHigh(now: UInt64(Date().timeIntervalSince1970 * 1000)) }
                 FusionLog.ipc.error("eventbus ingest buffer full (backpressure HIGH), drop oldest (A3/A10)")
                 let observers = backpressureObservers
                 Task { for h in observers { await h() } }

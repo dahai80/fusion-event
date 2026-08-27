@@ -31,6 +31,10 @@ public actor AuditBridge {
         do {
             let resp = try await callWithTimeout(req)
             if let err = resp.error {
+                if err.code == RPCErrorCode.guardBlock.rawValue {
+                    FusionLog.bridge.notice("guard explicit block via RPC error code=\(err.code), event blocked (S0: no fail-open bypass)")
+                    return .block(GuardAuditResult(decision: .block, reason: err.message, riskLevel: 0, auditId: ""))
+                }
                 FusionLog.bridge.error("guard.audit error code=\(err.code) \(err.message)")
                 return decideDegrade(signal: signal, reason: "guard error \(err.code)")
             }
@@ -86,7 +90,7 @@ public actor AuditBridge {
 
     private func ensureClient() -> UDSClient {
         if let c = client { return c }
-        let c = UDSClient(sockPath: sockPath)
+        let c = UDSClient(sockPath: sockPath, timeoutSec: timeoutSec)
         client = c
         return c
     }

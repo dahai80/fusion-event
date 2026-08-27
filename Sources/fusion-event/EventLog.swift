@@ -46,11 +46,12 @@ actor EventLog {
         }
         if fileHandle == nil { openHandle() }
         if fileHandle == nil {
-            try? data.write(to: URL(fileURLWithPath: logPath))
+            try? data.write(to: URL(fileURLWithPath: logPath), options: [.atomic])
             writtenBytes += Int64(data.count)
             return
         }
         fileHandle?.write(data)
+        try? fileHandle?.synchronize()
         writtenBytes += Int64(data.count)
     }
 
@@ -119,42 +120,49 @@ actor EventLog {
         var window: [String: UInt64] = [:]
         let nowMs = UInt64(Date().timeIntervalSince1970 * 1000)
         let cutoffMs = nowMs > (withinSec * 1000) ? nowMs - (withinSec * 1000) : 0
-        guard let fh = try? FileHandle(forReadingFrom: URL(fileURLWithPath: logPath)) else { return window }
         let dec = JSONDecoder()
-        let fileSize = (try? FileManager.default.attributesOfItem(atPath: logPath)[.size] as? Int64) ?? 0
-        var offset = max(0, fileSize)
-        let chunkSize: Int64 = 65536
-        var buffer = Data()
-        var stop = false
-        while offset > 0 && !stop {
-            let readLen = min(chunkSize, offset)
-            offset -= readLen
-            try? fh.seek(toOffset: UInt64(offset))
-            let chunk = fh.readData(ofLength: Int(readLen))
-            buffer = chunk + buffer
-            while let nl = buffer.lastIndex(of: 0x0A) {
-                let line = buffer.subdata(in: (nl + 1)..<buffer.count)
-                buffer.removeSubrange(nl..<buffer.count)
-                guard !line.isEmpty, let entry = try? dec.decode(LoggedEvent.self, from: line) else { continue }
-                if entry.event.timestamp < cutoffMs { stop = true; break }
-                guard !entry.matchedRules.isEmpty else { continue }
-                for ruleName in entry.matchedRules {
-                    let ts = entry.event.timestamp
-                    if window[ruleName, default: 0] < ts { window[ruleName] = ts }
-                }
-            }
-        }
-        if !stop, !buffer.isEmpty {
-            if let entry = try? dec.decode(LoggedEvent.self, from: buffer) {
-                if entry.event.timestamp >= cutoffMs, !entry.matchedRules.isEmpty {
+        let files = readableLogFiles().reversed()
+        var stopAll = false
+        for f in files {
+            if stopAll { break }
+            guard let fh = try? FileHandle(forReadingFrom: URL(fileURLWithPath: f)) else { continue }
+            let fileSize = (try? FileManager.default.attributesOfItem(atPath: f)[.size] as? Int64) ?? 0
+            var offset = max(0, fileSize)
+            let chunkSize: Int64 = 65536
+            var buffer = Data()
+            var stop = false
+            while offset > 0 && !stop {
+                let readLen = min(chunkSize, offset)
+                offset -= readLen
+                try? fh.seek(toOffset: UInt64(offset))
+                let chunk = fh.readData(ofLength: Int(readLen))
+                buffer = chunk + buffer
+                while let nl = buffer.lastIndex(of: 0x0A) {
+                    let line = buffer.subdata(in: (nl + 1)..<buffer.count)
+                    buffer.removeSubrange(nl..<buffer.count)
+                    guard !line.isEmpty, let entry = try? dec.decode(LoggedEvent.self, from: line) else { continue }
+                    if entry.event.timestamp < cutoffMs { stop = true; break }
+                    guard !entry.matchedRules.isEmpty else { continue }
                     for ruleName in entry.matchedRules {
                         let ts = entry.event.timestamp
                         if window[ruleName, default: 0] < ts { window[ruleName] = ts }
                     }
                 }
             }
+            if !stop, !buffer.isEmpty {
+                if let entry = try? dec.decode(LoggedEvent.self, from: buffer) {
+                    if entry.event.timestamp < cutoffMs { stop = true }
+                    else if !entry.matchedRules.isEmpty {
+                        for ruleName in entry.matchedRules {
+                            let ts = entry.event.timestamp
+                            if window[ruleName, default: 0] < ts { window[ruleName] = ts }
+                        }
+                    }
+                }
+            }
+            try? fh.close()
+            if stop { stopAll = true }
         }
-        try? fh.close()
         return window
     }
 

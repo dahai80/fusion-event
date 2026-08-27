@@ -77,8 +77,9 @@ struct FusionEventConfig: Codable, Sendable {
                 let enc = JSONEncoder()
                 enc.outputFormatting = [.prettyPrinted, .sortedKeys]
                 let out = try enc.encode(cfg)
-                try out.write(to: URL(fileURLWithPath: path))
-                FusionLog.lifecycle.info("config written to \(path, privacy: .public)")
+                try out.write(to: URL(fileURLWithPath: path), options: [.atomic])
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+                FusionLog.lifecycle.info("config written to \(path, privacy: .public) mode=0600 (S1)")
             }
         } catch {
             FusionLog.lifecycle.error("config load fail \(error.localizedDescription, privacy: .public), use default")
@@ -103,8 +104,9 @@ struct FusionEventConfig: Codable, Sendable {
             return s
         }
         let newId = "node-" + UUID().uuidString.prefix(8)
-        try? newId.data(using: .utf8)?.write(to: URL(fileURLWithPath: idPath))
-        FusionLog.lifecycle.info("nodeId generated and persisted \(newId, privacy: .public) at \(idPath, privacy: .public) (A2: stable unique identity, not hostname)")
+        try? newId.data(using: .utf8)?.write(to: URL(fileURLWithPath: idPath), options: [.atomic])
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: idPath)
+        FusionLog.lifecycle.info("nodeId generated and persisted \(newId, privacy: .public) at \(idPath, privacy: .public) mode=0600 (A2: stable unique identity, not hostname; S1)")
         return String(newId)
     }
 }

@@ -19,9 +19,11 @@ public actor PasteboardSource: EventSource {
         lastCount = NSPasteboard.general.changeCount
         timer = Task { [weak self] in
             while !Task.isCancelled {
-                let ns = (self?.intervalSec ?? 1) * 1_000_000_000
+                guard let self else { break }
+                let ns = self.intervalSec * 1_000_000_000
                 try? await Task.sleep(nanoseconds: ns)
-                await self?.poll()
+                if Task.isCancelled { break }
+                await self.poll()
             }
         }
         FusionLog.source.info("pasteboard source start poll=\(self.intervalSec)s changeCount-based (E8: configurable, faster rapid-change detection)")
