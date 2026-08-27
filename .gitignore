@@ -1,0 +1,29 @@
+# Swift / SPM build
+.build/
+.swiftpm/
+Package.resolved
+*.xcodeproj
+xcuserdata/
+
+# Xcode
+DerivedData/
+*.xcscmblueprint
+*.xccheckout
+
+# macOS
+.DS_Store
+
+# Claude Code session / plugin data (not source)
+.claude/
+.remember/
+
+# runtime data (generated at run)
+*.db
+*.db-shm
+*.db-wal
+events.log
+events.log.*
+launchd.log
+es-xpc.endpoint
+config.json
+fusion-event.pid
