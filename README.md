@@ -8,6 +8,8 @@ filters through a Rule Engine (debounce + throttle + glob), and emits Agent Task
 to downstream daemons (`fusion-agent-studio`), with permission audit (`fusion-guard`) and
 historical context (`fusion-memory`) on the path.
 
+> **Status: `0.1.0-rc.1`** — first release candidate. Code-complete through 4 audit rounds; ES entitlement + release signing + guard/memory E2E pending (see CHANGELOG.md + docs/release-signing-checklist.md).
+
 - **Language**: Swift 6 (strict concurrency, `actor`-isolated).
 - **IPC**: JSON-RPC 2.0 over Unix Domain Socket, NDJSON-framed.
 - **Storage**: SQLite (WAL) for rules + debounce state; rolling JSONL event log.
