@@ -100,7 +100,7 @@ PRD/架构要求 4 个集成点。全部源码坐实 + issue 推进上游:
 | task.submit | 下游 → fusion-agent-studio | agent-studio #250 CLOSED | rc.2 已对齐: `input.event` snake_case 匹配 `trigger_input.py` 冻结契约; E2E 已验 (M9) | 无 |
 | guard.audit | 上游 ← fusion-guard | fusion-guard #3 CLOSED | rc.4 已对齐 + 真实 E2E 验证: 方向 A, 上游 v0.1.1 实现 D-10 冻结契约 (`guard.audit` + `AuditDecision`); fusion-event 调 audit 传 trigger_id/event_type/target_path/target_agent/payload/node_id/tenant_id; **tenant_id 必须为 `"default"`** (guard 将本地 daemon 身份 uid 绑定 `fg_store::DEFAULT_TENANT`, 其它值 → 跨租户拒绝 -32001 → fail-closed); `E2EGuardTests.swift` 真实 daemon pass (benign) + block (rm-rf 注入) 全通过 | 无 |
 | memory.retrieve_context | 上游 ← fusion-memory | fusion-memory #4 CLOSED | rc.3 已对齐 + 真实 E2E 验证: 上游加 `memory.retrieve_context_contract` (method/params/response 全匹配); socket 路径 fusion-event 适配 `~/.fusion-memory/fusion-memory.sock`; `E2EMemoryTests.swift` 真实 daemon commit+retrieve+delete_scope 全通过 | 无 |
-| event.subscribe / event.notification | 下游 → fusion-studio (消费方) | fusion-studio #346 OPEN | 新提, 消费方未实现 | studio 需加 EventBridge UDS 长连 + NDJSON 推流解析; fusion-event 侧已实现 push (camelCase, PRD 契约) |
+| event.subscribe / event.notification | 下游 → fusion-studio (消费方) | fusion-studio #346 已实现 (studio 侧) | rc.4 已对齐 + 进程内 E2E 验证: studio `EventBridge.swift` 已实现 UDS 长连 (`/tmp/fusion-event.sock`) + NDJSON 推流解析 + heartbeat/pong (15s/45s) + 断线 5s 重连 + rule.* 短连接管理; fusion-event 侧 push 契约冻结 — `event.subscribe`→`{subscribed:true}`, `event.notification` push `params.event{eventId,type,targetPath,timestamp,payload,nodeId}`+`params.source`, `event.heartbeat`/`event.pong` keepalive; `E2ESubscribePushTests.swift` 进程内 IPCServer + 原始 UDS 客户端验全契约 (订阅 ACK + 推流字段 + 心跳保活), 全通过 | 无 |
 
 issue 链接:
 - task.submit: https://github.com/dahai80/fusion-agent-studio/issues/250
@@ -108,4 +108,4 @@ issue 链接:
 - memory.retrieve_context: https://github.com/dahai80/fusion-memory/issues/4
 - event.subscribe: https://github.com/dahai80/fusion-studio/issues/346
 
-task.submit、guard、memory 三链均 E2E 真实 daemon 验过 (rc.4)。studio 消费方待 studio 侧实现 (issue #346 OPEN)。商用发布前硬阻塞: ES 签名凭据 (issue #1) + studio 消费方。
+四链全部 E2E 验过 (rc.4): task.submit、guard、memory 真实 daemon; event.subscribe push 进程内 IPCServer (studio #346 已实现消费方)。商用发布前唯一硬阻塞: ES 签名凭据 (issue #1, Apple 外部)。

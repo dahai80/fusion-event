@@ -2,19 +2,21 @@
 
 ## [0.1.0-rc.4] — 2026-08-28
 
-Patch release. Verifies the guard chain against a real fusion-guard daemon (issue #3 CLOSED upstream) and fixes a tenant_id bug discovered by that E2E test.
+Patch release. Verifies the guard chain against a real fusion-guard daemon (issue #3 CLOSED upstream), fixes a tenant_id bug discovered by that E2E test, and verifies the subscribe/push contract against fusion-studio's consumer-side implementation (issue #346).
 
 ### Fixed
 - **guard chain tenant_id** (`AuditBridge.audit`): rc.3 hardcoded `tenant_id="fusion-event"`, but fusion-guard binds the local-daemon identity (uid) to `fg_store::DEFAULT_TENANT = "default"` only — any other value yields `cross-tenant audit denied (P0-1)` → RPC error -32001 → AuditBridge fail-closed. Changed to `tenant_id="default"`. Block still surfaces via `result.decision="block"` (S0), not RPC error.
 
 ### Added
 - **`E2EGuardTests.swift`** — env-gated (`FUSION_EVENT_E2E=1`) real-daemon E2E against live fusion-guard (UDS `/tmp/fusion-guard.sock`). Verifies fusion-event's own `AuditBridge.audit` code path (params build + socket call + `AuditDecision` response parse) for a benign path (→ `pass`, non-empty `audit_id`) and a malicious path (`rm -rf /` injection → `block`, non-empty `audit_id`). No cleanup: guard appends audit-chain rows (immutable ledger). Passed against real fusion-guard v0.1.1.
+- **`E2ESubscribePushTests.swift`** — env-gated (`FUSION_EVENT_E2E=1`) E2E for the fusion-studio consumer contract (issue #346). Starts a real `IPCServer` in-process on a temp socket, connects a raw NDJSON UDS client (the studio `EventBridge` consumer path), and verifies the frozen push contract: `event.subscribe`→`{subscribed:true}`, `event.notification` push with `params.event{eventId,type,targetPath,timestamp,payload,nodeId}` + `params.source` for each published event, and the keepalive lifecycle (`event.heartbeat` every 15s, `event.pong` reply keeps the long-connection alive). No external daemon needed (in-process server). Both tests passed.
 
 ### Verification
 - `swift build` (debug + release): green
-- `swift test`: 69 passing, 8 skipped, 0 failures
+- `swift test`: 71 passing, 10 skipped, 0 failures
 - `swift-format lint`: exit 0
 - **guard.audit real-daemon E2E** (issue #3 CLOSED): `FUSION_EVENT_E2E=1 swift test --filter E2EGuardTests` — both pass/block tests green against live fusion-guard
+- **event.subscribe push E2E** (issue #346 implemented studio-side): `FUSION_EVENT_E2E=1 swift test --filter E2ESubscribePushTests` — subscribe ACK + notification push fields + heartbeat/pong keepalive green against in-process server
 - memory + task.submit chains unchanged from rc.3 (already verified correct against upstream source)
 
 ## [0.1.0-rc.3] — 2026-08-28
