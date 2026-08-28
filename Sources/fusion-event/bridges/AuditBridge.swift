@@ -19,25 +19,16 @@ public actor AuditBridge {
     }
 
     public func audit(signal: TriggerSignal) async -> AuditOutcome {
-        let eventContent: [String: Any] = [
+        let params: [String: Any] = [
             "trigger_id": signal.triggerId,
             "event_type": signal.event.type.rawValue,
             "target_path": signal.event.targetPath ?? "",
             "target_agent": signal.rule.targetAgent,
             "payload": signal.event.payload,
-            "node_id": signal.nodeId
+            "node_id": signal.nodeId,
+            "tenant_id": "fusion-event"
         ]
-        let contentJSON = (try? JSONSerialization.data(withJSONObject: eventContent, options: [.sortedKeys]))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        let params: [String: Any] = [
-            "content": contentJSON,
-            "caller_epoch": 0,
-            "tenant_id": "fusion-event",
-            "requester": signal.nodeId,
-            "action": "",
-            "content_type": "json"
-        ]
-        let req = RPCRequest(method: "guard.evaluate", params: AnyCodable(params), id: .int(Int.random(in: 1...Int.max)))
+        let req = RPCRequest(method: "guard.audit", params: AnyCodable(params), id: .int(Int.random(in: 1...Int.max)))
         do {
             let resp = try await callWithTimeout(req)
             if let err = resp.error {
@@ -45,21 +36,21 @@ public actor AuditBridge {
                     FusionLog.bridge.notice("guard explicit block via RPC error code=\(err.code), event blocked (S0: no fail-open bypass)")
                     return .block(GuardAuditResult(decision: .block, reason: err.message, riskLevel: 0, auditId: ""))
                 }
-                FusionLog.bridge.error("guard.evaluate error code=\(err.code) \(err.message)")
+                FusionLog.bridge.error("guard.audit error code=\(err.code) \(err.message)")
                 return decideDegrade(signal: signal, reason: "guard error \(err.code)")
             }
             guard let result = resp.result?.value as? [String: Any],
-                  let actionStr = result["action"] as? String else {
+                  let decisionStr = result["decision"] as? String else {
                 return decideDegrade(signal: signal, reason: "guard malformed response")
             }
-            let riskLevel = parseRiskLevel(result["risk_level"])
+            let riskLevel = result["risk_level"] as? Int ?? 0
             let res = GuardAuditResult(
-                decision: mapAction(actionStr),
-                reason: result["reason"] as? String ?? result["inferred_category"] as? String ?? "",
+                decision: mapDecision(decisionStr),
+                reason: result["reason"] as? String ?? "",
                 riskLevel: riskLevel,
-                auditId: result["action_id"] as? String ?? ""
+                auditId: result["audit_id"] as? String ?? ""
             )
-            FusionLog.bridge.info("guard.evaluate action=\(actionStr, privacy: .public) risk=L\(riskLevel) trigger=\(signal.triggerId, privacy: .public)")
+            FusionLog.bridge.info("guard.audit decision=\(decisionStr, privacy: .public) risk=\(riskLevel) trigger=\(signal.triggerId, privacy: .public) audit_id=\(res.auditId, privacy: .public)")
             switch res.decision {
             case .pass: return .pass(res)
             case .block: return .block(res)
@@ -106,19 +97,13 @@ public actor AuditBridge {
         return c
     }
 
-    private nonisolated func mapAction(_ s: String) -> GuardDecision {
+    private nonisolated func mapDecision(_ s: String) -> GuardDecision {
         switch s {
-        case "Allow": return .pass
-        case "Preview": return .challenge
-        case "Redact", "Block": return .block
+        case "pass": return .pass
+        case "challenge": return .challenge
+        case "block": return .block
         default: return .block
         }
-    }
-
-    private nonisolated func parseRiskLevel(_ v: Any?) -> Int {
-        if let i = v as? Int { return i }
-        if let s = v as? String, s.hasPrefix("L"), let n = Int(s.dropFirst()) { return n }
-        return 0
     }
 
     private func resetClientOnError(_ err: UDSClientError) async {

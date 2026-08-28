@@ -7,7 +7,7 @@ actor RPCMethods {
     private let registry: SourceRegistry
     private let config: FusionEventConfig
     private let metrics: MetricsCollector
-    private let version = "0.1.0-rc.2"
+    private let version = "0.1.0-rc.3"
     private let schemaVersion = 1
     private let replayMaxLimit = 10_000
     private var startedAt: UInt64
