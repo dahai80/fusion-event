@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.0-rc.4] — 2026-08-28
+
+Patch release. Verifies the guard chain against a real fusion-guard daemon (issue #3 CLOSED upstream) and fixes a tenant_id bug discovered by that E2E test.
+
+### Fixed
+- **guard chain tenant_id** (`AuditBridge.audit`): rc.3 hardcoded `tenant_id="fusion-event"`, but fusion-guard binds the local-daemon identity (uid) to `fg_store::DEFAULT_TENANT = "default"` only — any other value yields `cross-tenant audit denied (P0-1)` → RPC error -32001 → AuditBridge fail-closed. Changed to `tenant_id="default"`. Block still surfaces via `result.decision="block"` (S0), not RPC error.
+
+### Added
+- **`E2EGuardTests.swift`** — env-gated (`FUSION_EVENT_E2E=1`) real-daemon E2E against live fusion-guard (UDS `/tmp/fusion-guard.sock`). Verifies fusion-event's own `AuditBridge.audit` code path (params build + socket call + `AuditDecision` response parse) for a benign path (→ `pass`, non-empty `audit_id`) and a malicious path (`rm -rf /` injection → `block`, non-empty `audit_id`). No cleanup: guard appends audit-chain rows (immutable ledger). Passed against real fusion-guard v0.1.1.
+
+### Verification
+- `swift build` (debug + release): green
+- `swift test`: 69 passing, 8 skipped, 0 failures
+- `swift-format lint`: exit 0
+- **guard.audit real-daemon E2E** (issue #3 CLOSED): `FUSION_EVENT_E2E=1 swift test --filter E2EGuardTests` — both pass/block tests green against live fusion-guard
+- memory + task.submit chains unchanged from rc.3 (already verified correct against upstream source)
+
 ## [0.1.0-rc.3] — 2026-08-28
 
 Patch release. Corrects the guard-chain contract direction misjudged in rc.2.
