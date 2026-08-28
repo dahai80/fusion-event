@@ -26,7 +26,7 @@ public actor AuditBridge {
             "target_agent": signal.rule.targetAgent,
             "payload": signal.event.payload,
             "node_id": signal.nodeId,
-            "tenant_id": "fusion-event"
+            "tenant_id": "default"
         ]
         let req = RPCRequest(method: "guard.audit", params: AnyCodable(params), id: .int(Int.random(in: 1...Int.max)))
         do {

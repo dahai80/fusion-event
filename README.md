@@ -8,7 +8,7 @@ filters through a Rule Engine (debounce + throttle + glob), and emits Agent Task
 to downstream daemons (`fusion-agent-studio`), with permission audit (`fusion-guard`) and
 historical context (`fusion-memory`) on the path.
 
-> **Status: `0.1.0-rc.3`** — third release candidate. Guard chain corrected to `guard.audit` (direction A, fusion-guard v0.1.1 D-10 frozen contract); memory `retrieve_context` + task.submit snake_case aligned in rc.2. All three integration chains now match upstream source. ES entitlement + release signing still pending (see CHANGELOG.md + docs/release-signing-checklist.md).
+> **Status: `0.1.0-rc.4`** — fourth release candidate. Guard chain verified against a real fusion-guard daemon (pass/block decision mapping) + tenant_id fixed to `"default"`; all three integration chains (guard.audit / memory.retrieve_context / task.submit) E2E-verified against live upstream daemons. ES entitlement + release signing still pending (see CHANGELOG.md + docs/release-signing-checklist.md).
 
 - **Language**: Swift 6 (strict concurrency, `actor`-isolated).
 - **IPC**: JSON-RPC 2.0 over Unix Domain Socket, NDJSON-framed.
@@ -32,9 +32,9 @@ M0–M4 implemented and verified:
 | M6 | Architecture audit hardening (A/R/E): A2 nodeId persist UUID, A3 true ingest decouple (bounded stream + `drainIngest`), A4 ContextBridge LRU bound, A6/R3 monotonic dedup, A10 backpressure回流 (observe/notify), R1 FSEvents whitelist, R2 dispatch capacity configurable, R4 crash-safe outbox + replay, R5 WAL checkpoint, R6/R10 shutdown hard timeout + drain, R7 source throttle, R8 mountObserver registered, R9 EventLog atomic rotate, E1 RuleStore concurrency, E2 UPSERT preserve created_at, E3 migration versioning, E5 buffered recv, E6 maxRetries honored, E8 pasteboard poll configurable | done — see `docs/audit-fixes-0827.md` §第二轮; A1/A7/A8/A9/E4/E7/E9 deferred (design/external/low-pri) |
 | M7 | Production-readiness audit hardening (P0–P3): F-CRASH-1 FSEvents concurrent-mutate crash (snapshot flush), F-CRASH-2 outbox failed-replay delete (fail-keep), F-CRASH-3 atomic+fsync write, S0 guard-block no fail-open, P4-1 bounded fan-out, F-1/2/3 source lifecycle+UAF, F-IDEM-1/2 nodeId idempotency + failed-occupy, F-DROP-1 overflow-to-outbox, F-PERSIST-1/2/3/4/5/6 migration+WAL FULL+fsync+archive scan, F-EVICT-1/2 true LRU + O(n) purge, F-TIMEOUT-1 configurable recv timeout, D2/D3 shutdown RPC + real nodeId, S1 0600 files, S3 replay cap, F-5/6/10/11/12/13/15/16 source+IPC fixes, F-EVICT-2, P4-2/4, O4/O5/O8/O9/O10 ops, D5 batch+notification, S4 rule validation | done — see `docs/audit-fixes-0827.md` §第三轮; S5/S6/D4 ES entitlement, A2-3 HA, end-to-end联调 deferred (external) |
 | M8 | Release engineering + observability: O1/E9 in-process metrics pipeline (`MetricsCollector` actor, counters + latency histogram P50/P99 + backpressure duration, `event.metrics` RPC), codesign/notarize script (`scripts/sign.sh` + entitlements, hardened runtime, ES entitlement commented pending Apple approval), chaos/long-run stress harness (`StressHarnessTests`, env-gated `FUSION_EVENT_STRESS`, 4 tests: memory-drift / downstream-kill outbox replay / disk-full degrade / concurrent IPC load) | done — see `docs/audit-fixes-0827.md` §第四轮; S5/S6/D4 ES entitlement, A2-3 HA, end-to-end联调 still external (issues #3/#4/#250) |
-| M9 | E2E integration smoke (task.submit + memory.retrieve_context): env-gated `E2EStudioTests` connects fusion-event full chain to a **real** agent-studio daemon over UDS, pushes file events, verifies `task.submit` accepted + `task_id` returned (submitted>0, failed==0). `E2EMemoryTests` connects fusion-event's own `ContextBridge` to a **real** fusion-memory daemon, commits a test Interaction via `commit`, calls `retrieveContext`, asserts non-empty context + `interaction_id` present + `cache_hit=false`, then cleans up via `delete_scope`. Proves socket+params+response contracts end-to-end. | done — task.submit `input.event` snake_case (issue #250 fixed rc.2); guard.audit (#3, direction A) + retrieve_context (#4) chains contract-verified via MockGuard/MockMemory unit tests rc.3; retrieve_context real-daemon E2E verified rc.3 (issue #4 CLOSED); guard.audit real-daemon E2E pending upstream daemon availability |
+| M9 | E2E integration smoke (task.submit + memory.retrieve_context + guard.audit): env-gated `E2EStudioTests` connects fusion-event full chain to a **real** agent-studio daemon over UDS, pushes file events, verifies `task.submit` accepted + `task_id` returned (submitted>0, failed==0). `E2EMemoryTests` connects fusion-event's own `ContextBridge` to a **real** fusion-memory daemon, commits a test Interaction via `commit`, calls `retrieveContext`, asserts non-empty context + `interaction_id` present + `cache_hit=false`, then cleans up via `delete_scope`. `E2EGuardTests` connects fusion-event's own `AuditBridge` to a **real** fusion-guard daemon, verifies `guard.audit` D-10 contract decision mapping: benign path → `pass`, `rm -rf` injection path → `block`. Proves socket+params+response contracts end-to-end. | done — task.submit `input.event` snake_case (issue #250 fixed rc.2); all 3 chains (guard.audit #3 direction A, retrieve_context #4, task.submit #250) contract-verified via unit tests + real-daemon E2E rc.4 (issues #3/#4 CLOSED) |
 
-Tests: 67 unit tests, all passing (`swift test`), ~2s. 4 stress + 2 E2E skipped by default — stress via `FUSION_EVENT_STRESS=1 swift test --filter StressHarnessTests`; task.submit E2E via `FUSION_EVENT_E2E=1 swift test --filter E2EStudioTests` (requires real agent-studio daemon on `/tmp/fusion-studio.sock`); memory E2E via `FUSION_EVENT_E2E=1 swift test --filter E2EMemoryTests` (requires real fusion-memory daemon on `~/.fusion-memory/fusion-memory.sock` + running fusion-mlx embedding backend).
+Tests: 69 unit tests, all passing (`swift test`), ~2s. 4 stress + 4 E2E skipped by default — stress via `FUSION_EVENT_STRESS=1 swift test --filter StressHarnessTests`; task.submit E2E via `FUSION_EVENT_E2E=1 swift test --filter E2EStudioTests` (requires real agent-studio daemon on `/tmp/fusion-studio.sock`); memory E2E via `FUSION_EVENT_E2E=1 swift test --filter E2EMemoryTests` (requires real fusion-memory daemon on `~/.fusion-memory/fusion-memory.sock` + running fusion-mlx embedding backend); guard E2E via `FUSION_EVENT_E2E=1 swift test --filter E2EGuardTests` (requires real fusion-guard daemon on `/tmp/fusion-guard.sock`).
 
 ### Phase-2 — System Extension + XPC (L1 skeleton, contract frozen)
 
@@ -73,6 +73,7 @@ FUSION_EVENT_STRESS=1 FUSION_EVENT_STRESS_ITERS=5000 swift test --filter StressH
 # E2E integration against REAL daemons (env-gated, needs daemons up):
 FUSION_EVENT_E2E=1 swift test --filter E2EStudioTests    # task.submit -> agent-studio
 FUSION_EVENT_E2E=1 swift test --filter E2EMemoryTests    # retrieve_context -> fusion-memory (+fusion-mlx embeddings)
+FUSION_EVENT_E2E=1 swift test --filter E2EGuardTests      # guard.audit -> fusion-guard (pass/block decision mapping)
 ```
 
 Daemon lifecycle (matches monorepo `start.sh` convention):
@@ -132,6 +133,14 @@ E2E integration (M9):
   `cache_hit=false`, then cleans up via `delete_scope` (confirm=true). Requires real daemon on
   `~/.fusion-memory/fusion-memory.sock` (override via `FUSION_EVENT_E2E_MEMORY_SOCK`) + a running
   fusion-mlx embedding backend (`~/claude-home/fusion-mlx/start.sh start`).
+- `Tests/fusion-eventTests/E2EGuardTests.swift` — env-gated
+  (`FUSION_EVENT_E2E=1`, skipped in default `swift test`), connects fusion-event's own
+  `AuditBridge` to a **real** fusion-guard daemon, verifies the `guard.audit` D-10 contract
+  decision mapping: a benign file path → `pass` (non-empty `audit_id`), a `rm -rf` injection
+  path → `block` (non-empty `audit_id`). Requires real daemon on
+  `/tmp/fusion-guard.sock` (override via `FUSION_EVENT_E2E_GUARD_SOCK`). `tenant_id` MUST be
+  `"default"` (guard binds the local-daemon identity to `fg_store::DEFAULT_TENANT` only;
+  any other value → cross-tenant denied -32001 → fail-closed).
 
 ---
 
@@ -358,6 +367,7 @@ Tests: `GlobTests`, `NormalizerTests`, `RuleEngineTests`, `DispatcherTests`, `ES
 `StressHarnessTests` (M8/O2 env-gated chaos: memory-drift / downstream-kill outbox replay / disk-full degrade / concurrent IPC load),
 `E2EStudioTests` (M9 env-gated E2E: real agent-studio daemon task.submit socket+params+response contract),
 `E2EMemoryTests` (M9 env-gated E2E: real fusion-memory daemon retrieve_context contract — commit + retrieve + delete_scope cleanup),
+`E2EGuardTests` (M9 env-gated E2E: real fusion-guard daemon guard.audit D-10 contract — benign→pass, rm-rf→block),
 `AuditBridgeTests` (rc.3 guard.audit D-10 contract: pass/block/challenge + fail-closed), `ContextBridgeTests` (retrieve_context contract parse + LRU + degrade).
 
 ---
