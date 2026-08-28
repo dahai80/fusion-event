@@ -28,7 +28,7 @@ This is the canonical glob semantics shared across the Fusion ecosystem event la
 |---------|---------|----------------|
 | `/src/*.swift` | `/src/a.swift` | `/src/sub/a.swift`, `/out/a.swift` |
 | `/src/**/*.swift` | `/src/a.swift`, `/src/x/y/a.swift` | `/out/a.swift` |
-| `/Users/dahai/src/**/*.swift` | `/Users/dahai/src/a.swift` | `/Users/dahai/out/a.swift` |
+| `/Users/you/src/**/*.swift` | `/Users/you/src/a.swift` | `/Users/you/out/a.swift` |
 | `*.log` | `app.log` | `dir/app.log` |
 | `/x/a?` | `/x/ab` | `/x/a/`, `/x/a` |
 

@@ -57,7 +57,7 @@ final class E2EMemoryTests: XCTestCase {
         let sock = e2eMemorySock()
         try XCTSkipUnless(socketAlive(sock), "E2E: real memory socket \(sock) absent — start fusion-memory daemon")
 
-        let targetPath = "/Users/dahai/fusion/fusion-event/Sources/fusion-event/bridges/ContextBridge.swift"
+        let targetPath = "/Users/you/fusion/fusion-event/Sources/fusion-event/bridges/ContextBridge.swift"
         let sessionId = "fe-e2e-mem-\(getpid())"
         let interactionId = "fe-e2e-int-\(getpid())"
         let marker = "fe-e2e-mem-verified-marker"
@@ -81,7 +81,7 @@ final class E2EMemoryTests: XCTestCase {
                 "timestamp": UInt64(Date().timeIntervalSince1970),
                 "metadata": [
                     "node_id": "e2e-n1",
-                    "project_path": "/Users/dahai/fusion/fusion-event"
+                    "project_path": "/Users/you/fusion/fusion-event"
                 ]
             ]
         ]

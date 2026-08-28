@@ -1,390 +1,109 @@
 # fusion-event
 
+> **Languages**: [English](README.md) | [中文](README_CN.md)
+
+# fusion-event
+
 macOS-native **reactive event daemon** — the Fusion ecosystem's perception layer.
 
-Turns passive "wait for User Prompt" into "sense system events → trigger Agent Swarm".
+Turns passive "wait for User Prompt" into **"sense system events → trigger Agent Swarm"**.
 Listens to macOS system-level events (file / process / clipboard / network), normalizes them,
-filters through a Rule Engine (debounce + throttle + glob), and emits Agent Task triggers
-to downstream daemons (`fusion-agent-studio`), with permission audit (`fusion-guard`) and
-historical context (`fusion-memory`) on the path.
+filters through a Rule Engine (debounce + throttle + glob), and emits Agent Task triggers to
+downstream daemons — with permission audit (`fusion-guard`) and historical context
+(`fusion-memory`) on the path.
 
-> **Status: `0.1.0-rc.4`** — fourth release candidate. Guard chain verified against a real fusion-guard daemon (pass/block decision mapping) + tenant_id fixed to `"default"`; the subscribe/push contract (`event.subscribe` + `event.notification` + `event.heartbeat`/`event.pong`) verified in-process (fusion-studio issue #346 implemented consumer-side). All four integration chains (guard.audit / memory.retrieve_context / task.submit / event.subscribe push) E2E-verified. ES entitlement + release signing still pending (see CHANGELOG.md + docs/release-signing-checklist.md).
+- **Language**: Swift 6, strict concurrency (`actor`-isolated throughout)
+- **Platform**: macOS 14.0+ (Apple Silicon)
+- **IPC**: JSON-RPC 2.0 over Unix Domain Socket, NDJSON-framed
+- **Storage**: SQLite (WAL) rules + debounce state; rolling JSONL event log
+- **Local-only**: every socket is UDS on the loopback; no cross-node TCP
 
-- **Language**: Swift 6 (strict concurrency, `actor`-isolated).
-- **IPC**: JSON-RPC 2.0 over Unix Domain Socket, NDJSON-framed.
-- **Storage**: SQLite (WAL) for rules + debounce state; rolling JSONL event log.
-- **Logging**: `os.Logger` (unified logging, subsystem `com.fusion.event`).
-
----
-
-## Status
-
-M0–M4 implemented and verified:
-
-| Milestone | Scope | State |
-|-----------|-------|-------|
-| M0 | SPM skeleton, `SystemEvent`/`EventRule` contracts, UDS JSON-RPC server, bridges, `start.sh` | done |
-| M1 | Event sources (FSEvents / NSWorkspace / NWPathMonitor / Pasteboard), EventBus, RuleEngine, Normalizer, `rule.*` RPC | done |
-| M2 | AuditBridge + ContextBridge wired, 3-state timeout degrade, token bucket, idempotency LRU | done |
-| M3 | EndpointSecurity privileged process events (exec/exit/fork) | in-process + degrade — esEnabled flag, fail-closed to NSWorkspace |
-| M4 | Ecosystem hardening: multi-node boundary (H2), 2000-event stress + backpressure (H5), idempotency collapse (H1), token-bucket drain (R1), docs (API + integration + glob spec E1) | done — internal-verifiable parts; upstream studio/cli/guard/memory联调 via frozen contract (issue-tracked) |
-| M5 | Adversarial audit hardening (P0–P3): F1 socket 0600 + peer-uid auth, F2 ingest/dispatch decouple + bounded backpressure (drop-counted, not silent), F4 ES NULL guard, F5 poisoned-conn reset, F6 fd ownership, F7 config persist, F8 recv OOM cap, F9 idempotency-occupy only on success/block, L1 signal race, L2 LRU+queue cap, L3 N-per-window throttle, L4 wake type, L5 param SQL, L6 FSEvents UAF, L7 shutdown drain, L8 write-all, P1–P3 EventLog perf, M1–M5 | done — see `docs/audit-fixes-0827.md` |
-| M6 | Architecture audit hardening (A/R/E): A2 nodeId persist UUID, A3 true ingest decouple (bounded stream + `drainIngest`), A4 ContextBridge LRU bound, A6/R3 monotonic dedup, A10 backpressure回流 (observe/notify), R1 FSEvents whitelist, R2 dispatch capacity configurable, R4 crash-safe outbox + replay, R5 WAL checkpoint, R6/R10 shutdown hard timeout + drain, R7 source throttle, R8 mountObserver registered, R9 EventLog atomic rotate, E1 RuleStore concurrency, E2 UPSERT preserve created_at, E3 migration versioning, E5 buffered recv, E6 maxRetries honored, E8 pasteboard poll configurable | done — see `docs/audit-fixes-0827.md` §第二轮; A1/A7/A8/A9/E4/E7/E9 deferred (design/external/low-pri) |
-| M7 | Production-readiness audit hardening (P0–P3): F-CRASH-1 FSEvents concurrent-mutate crash (snapshot flush), F-CRASH-2 outbox failed-replay delete (fail-keep), F-CRASH-3 atomic+fsync write, S0 guard-block no fail-open, P4-1 bounded fan-out, F-1/2/3 source lifecycle+UAF, F-IDEM-1/2 nodeId idempotency + failed-occupy, F-DROP-1 overflow-to-outbox, F-PERSIST-1/2/3/4/5/6 migration+WAL FULL+fsync+archive scan, F-EVICT-1/2 true LRU + O(n) purge, F-TIMEOUT-1 configurable recv timeout, D2/D3 shutdown RPC + real nodeId, S1 0600 files, S3 replay cap, F-5/6/10/11/12/13/15/16 source+IPC fixes, F-EVICT-2, P4-2/4, O4/O5/O8/O9/O10 ops, D5 batch+notification, S4 rule validation | done — see `docs/audit-fixes-0827.md` §第三轮; S5/S6/D4 ES entitlement, A2-3 HA, end-to-end联调 deferred (external) |
-| M8 | Release engineering + observability: O1/E9 in-process metrics pipeline (`MetricsCollector` actor, counters + latency histogram P50/P99 + backpressure duration, `event.metrics` RPC), codesign/notarize script (`scripts/sign.sh` + entitlements, hardened runtime, ES entitlement commented pending Apple approval), chaos/long-run stress harness (`StressHarnessTests`, env-gated `FUSION_EVENT_STRESS`, 4 tests: memory-drift / downstream-kill outbox replay / disk-full degrade / concurrent IPC load) | done — see `docs/audit-fixes-0827.md` §第四轮; S5/S6/D4 ES entitlement, A2-3 HA, end-to-end联调 still external (issues #3/#4/#250) |
-| M9 | E2E integration smoke (task.submit + memory.retrieve_context + guard.audit + event.subscribe push): env-gated `E2EStudioTests` connects fusion-event full chain to a **real** agent-studio daemon over UDS, pushes file events, verifies `task.submit` accepted + `task_id` returned (submitted>0, failed==0). `E2EMemoryTests` connects fusion-event's own `ContextBridge` to a **real** fusion-memory daemon, commits a test Interaction via `commit`, calls `retrieveContext`, asserts non-empty context + `interaction_id` present + `cache_hit=false`, then cleans up via `delete_scope`. `E2EGuardTests` connects fusion-event's own `AuditBridge` to a **real** fusion-guard daemon, verifies `guard.audit` D-10 contract decision mapping: benign path → `pass`, `rm -rf` injection path → `block`. `E2ESubscribePushTests` starts a real `IPCServer` in-process, connects a raw NDJSON UDS client (the fusion-studio `EventBridge` consumer path), verifies the frozen #346 push contract: `event.subscribe`→`{subscribed:true}`, `event.notification` push with `params.event{eventId,type,targetPath,timestamp,payload,nodeId}`+`params.source`, `event.heartbeat` 15s push + `event.pong` keepalive (connection survives). Proves socket+params+response contracts end-to-end. | done — task.submit `input.event` snake_case (issue #250 fixed rc.2); all 4 chains (guard.audit #3, retrieve_context #4, task.submit #250, event.subscribe push #346) contract-verified via unit tests + real-daemon/in-process E2E rc.4 (issues #3/#4 CLOSED, #346 implemented studio-side) |
-
-Tests: 71 unit tests, all passing (`swift test`), ~2s. 4 stress + 6 E2E skipped by default — stress via `FUSION_EVENT_STRESS=1 swift test --filter StressHarnessTests`; task.submit E2E via `FUSION_EVENT_E2E=1 swift test --filter E2EStudioTests` (requires real agent-studio daemon on `/tmp/fusion-studio.sock`); memory E2E via `FUSION_EVENT_E2E=1 swift test --filter E2EMemoryTests` (requires real fusion-memory daemon on `~/.fusion-memory/fusion-memory.sock` + running fusion-mlx embedding backend); guard E2E via `FUSION_EVENT_E2E=1 swift test --filter E2EGuardTests` (requires real fusion-guard daemon on `/tmp/fusion-guard.sock`); subscribe/push E2E via `FUSION_EVENT_E2E=1 swift test --filter E2ESubscribePushTests` (in-process IPCServer — no external daemon needed; verifies #346 push contract).
-
-### Phase-2 — System Extension + XPC (L1 skeleton, contract frozen)
-
-The PRD plan (§9.5) corrects the ES architecture: a faithful EndpointSecurity deployment is a
-**separate System Extension process** + XPC relay back to the daemon, not an in-process flag.
-Verification tiers:
-
-| Tier | Scope | State |
-|------|-------|-------|
-| L0 | Xcode System Extension target compiles | blocked — needs SPM→Xcode target |
-| L1 | XPC contract skeleton: `ESXPCProtocol` (`@objc`, `NSData` payload) + `ESXPCServer` (anonymous `NSXPCListener`) + `ESXPCMockClient` → EventBus; 3 tests pass zero-auth | **done** |
-| L2 | real `es_new_client` SUCCESS in extension process | blocked — needs Apple entitlement |
-| L3 | systemextension packaging + notarization + `OSSystemExtensionRequest` install | blocked — needs entitlement + signing |
-
-L1 is the only portable + verifiable part pre-authorization. Enabled by `FUSION_EVENT_ES_XPC_ENABLED=1`
-(`config.esXpcEnabled`); daemon starts an anonymous `NSXPCListener`, the (mock now, real later)
-extension connects via `NSXPCConnection(listenerEndpoint:)` and delivers `ESSnapshotXPC` as JSON-encoded
-`NSData`. When the Apple `endpoint-security.client` entitlement is granted, only the mock swaps to a real
-`es_new_client` extension — the XPC contract (`ESXPCProtocol`, `ESSnapshotXPC`) is frozen, zero change.
-
-> **Endpoint transport note:** `NSXPCListenerEndpoint` is only encodable by `NSXPCCoder`, not a generic
-> `NSKeyedArchiver` — it cannot be serialized to a file. The real extension acquires the endpoint via
-> launchd/xpc bootstrap (L3), not a file. The daemon exposes it in-process via the listener.
-
----
-
-## Build / Test / Run
+## Quick start
 
 ```bash
-swift build                   # debug
-swift build -c release        # release (start.sh prefers release)
-swift test                    # unit tests
-swift test --filter GlobTests # single suite
-# chaos/long-run stress harness (NOT in default swift test, env-gated):
-FUSION_EVENT_STRESS=1 FUSION_EVENT_STRESS_ITERS=5000 swift test --filter StressHarnessTests
-# E2E integration against REAL daemons (env-gated, needs daemons up):
-FUSION_EVENT_E2E=1 swift test --filter E2EStudioTests    # task.submit -> agent-studio
-FUSION_EVENT_E2E=1 swift test --filter E2EMemoryTests    # retrieve_context -> fusion-memory (+fusion-mlx embeddings)
-FUSION_EVENT_E2E=1 swift test --filter E2EGuardTests      # guard.audit -> fusion-guard (pass/block decision mapping)
-FUSION_EVENT_E2E=1 swift test --filter E2ESubscribePushTests  # event.subscribe -> notification push (#346, in-process server)
+git clone https://github.com/dahai80/fusion-event.git
+cd fusion-event
+swift build -c release
+./start.sh start        # launch daemon
+./start.sh doctor       # health check
+./start.sh status       # pid, socket, rss
+./start.sh stop         # graceful stop
 ```
 
-Daemon lifecycle (matches monorepo `start.sh` convention):
-
-```bash
-./start.sh start    # launch daemon (nohup, release binary or debug)
-./start.sh stop     # graceful stop (launchd-aware if installed, else nohup)
-./start.sh status   # pid, socket, rss (launchd-aware)
-./start.sh log [-f] # tail daemon log
-./start.sh doctor   # health check: socket / event.health RPC / triggers+outbox backlog / rules.db (O5)
-./start.sh install  # install as launchd agent (KeepAlive, RunAtLoad, crash-restart)
-./start.sh uninstall # remove launchd agent
-```
-
-`start`/`stop` run the daemon ad-hoc via `nohup` (PID file). `install`/`uninstall` manage a
-launchd agent (`~/Library/LaunchAgents/com.fusion.event.plist`, `KeepAlive=true`) for residency
-and automatic crash-restart — use one mode, not both. `stop`/`status` detect the launchd-managed
-process automatically.
-
-Runtime data lives in `~/.fusion-event/` (`config.json`, `rules.db`, `launchd.log`, `events.log`).
-
-Log rotation (O4): `start` rotates `launchd.log` at >10MB (keeps `.1`/`.2`/`.3`/`.4`). launchd plist
-sets `ThrottleInterval=10` / `ExitTimeOut=15` to avoid restart thrash (O8). `start` warns if a launchd
-plist is already installed (nohup + KeepAlive race, O9). `doctor` parses `event.health` via `python3`
-JSON (not fragile `nc`/`grep`, O10) and reports `triggers{failed,dropped,dispatch_dropped}` +
-outbox backlog (warn >50).
-
-Metrics (O1/E9): in-process `MetricsCollector` actor — counters (source events, trigger
-submitted/blocked/failed/dropped/retried, ingest+dispatch drops, outbox backlog), per-bridge
-latency histogram (P50/P99/avg/max for guard/memory/dispatch), backpressure active+total duration.
-No external deps. Exposed via `event.metrics` JSON-RPC (snapshot returns `AnyCodable`, Sendable).
-Drain/clear on demand. Wired into `Dispatcher` + `EventBus` at every counter/latency/pressure site.
-
-Release engineering (M8): `scripts/sign.sh` codesigns + notarizes the release binary for
-enterprise distribution (`codesign --options runtime` hardened runtime, `notarytool --wait`,
-`stapler staple`). Entitlements in `scripts/fusion-event.entitlements` (network client; ES
-entitlement commented out — blocked on Apple approval, ES source stays `esEnabled=false`).
-External prereqs the user must provide: Developer ID Application cert (keychain), notarytool
-keychain profile, ES entitlement (optional). Run `./scripts/sign.sh` (full) or `sign-only`.
-
-Stress harness (M8, O2): `Tests/fusion-eventTests/StressHarnessTests.swift` — 4 chaos/long-run
-tests, env-gated (`FUSION_EVENT_STRESS=1`, skipped in default `swift test`): long-run memory-drift
-bounded (RSS start vs end, heuristic 200MB cap), downstream-kill → outbox replay (R4 crash-safe),
-disk-full → degrade-no-crash, concurrent IPC client load (taskGroup). `FUSION_EVENT_STRESS_ITERS`
-scales iteration count (default 2000).
-
-E2E integration (M9):
-- `Tests/fusion-eventTests/E2EStudioTests.swift` — env-gated
-  (`FUSION_EVENT_E2E=1`, skipped in default `swift test`), connects fusion-event full chain
-  (EventBus → RuleEngine → Dispatcher) to a **real** agent-studio daemon over UDS and verifies
-  `task.submit` accepted + `task_id` returned. Requires real daemon on
-  `/tmp/fusion-studio.sock` (override via `FUSION_EVENT_E2E_STUDIO_SOCK`).
-- `Tests/fusion-eventTests/E2EMemoryTests.swift` — env-gated
-  (`FUSION_EVENT_E2E=1`, skipped in default `swift test`), connects fusion-event's own
-  `ContextBridge` to a **real** fusion-memory daemon, commits a test Interaction via `commit`,
-  calls `retrieveContext`, asserts non-empty context + `interaction_id` in `memory_ids` +
-  `cache_hit=false`, then cleans up via `delete_scope` (confirm=true). Requires real daemon on
-  `~/.fusion-memory/fusion-memory.sock` (override via `FUSION_EVENT_E2E_MEMORY_SOCK`) + a running
-  fusion-mlx embedding backend (`~/claude-home/fusion-mlx/start.sh start`).
-- `Tests/fusion-eventTests/E2EGuardTests.swift` — env-gated
-  (`FUSION_EVENT_E2E=1`, skipped in default `swift test`), connects fusion-event's own
-  `AuditBridge` to a **real** fusion-guard daemon, verifies the `guard.audit` D-10 contract
-  decision mapping: a benign file path → `pass` (non-empty `audit_id`), a `rm -rf` injection
-  path → `block` (non-empty `audit_id`). Requires real daemon on
-  `/tmp/fusion-guard.sock` (override via `FUSION_EVENT_E2E_GUARD_SOCK`). `tenant_id` MUST be
-  `"default"` (guard binds the local-daemon identity to `fg_store::DEFAULT_TENANT` only;
-  any other value → cross-tenant denied -32001 → fail-closed).
-- `Tests/fusion-eventTests/E2ESubscribePushTests.swift` — env-gated
-  (`FUSION_EVENT_E2E=1`, skipped in default `swift test`), starts a real `IPCServer` in-process
-  on a temp socket and connects a raw NDJSON UDS client (the fusion-studio `EventBridge`
-  consumer path, issue #346). Verifies the frozen push contract: `event.subscribe`→
-  `{subscribed:true}`, `event.notification` push with `params.event{eventId,type,targetPath,
-  timestamp,payload,nodeId}` + `params.source` for each published event, and the keepalive
-  lifecycle — `event.heartbeat` pushed every 15s, `event.pong` reply keeps the long-connection
-  alive (server does not kick). No external daemon needed (in-process server).
-
----
-
-## Architecture
-
-```
-┌─────────────┐   ┌─────────────┐   ┌──────────────┐   ┌──────────────┐
-│ FSEvents    │   │ NSWorkspace │   │ NWPathMonitor│   │ Pasteboard   │
-│ (fileMod)   │   │ (proc term) │   │ (net change) │   │ (clipboard)  │
-└──────┬──────┘   └──────┬──────┘   └──────┬───────┘   └──────┬───────┘
-       └──────────────────┴─────────────────┴─────────────────┘
-                          │ RawEvent
-                          ▼
-                     ┌──────────┐  backpressure
-                     │ EventBus │ ◄────────── AsyncStream (bufferingNewest 8192)
-                     └────┬─────┘
-                          ▼
-                   ┌─────────────┐  glob + type match
-                   │ RuleEngine  │  debounce / throttle
-                   └────┬────────┘
-                        │ TriggerSignal (idempotencyKey = SHA256(nodeId|rule|type|path|bucket))
-                        ▼
-                    ┌──────────┐
-                    │Dispatcher│  token bucket (max N) + pending queue (overflow>50 drops)
-                    └────┬─────┘
-              ┌──────────┼──────────┐
-              ▼          ▼          ▼
-        ┌─────────┐ ┌─────────┐ ┌─────────────┐
-        │  Audit  │ │ Context │ │ task.submit │
-        │  Bridge │ │  Bridge │ │ (agent-     │
-        │→ guard  │ │→ memory │ │  studio)    │
-        └─────────┘ └─────────┘ └─────────────┘
-```
-
-### Event path (ecosystem flow)
-
-```
-FSEvents ──► fusion-event ──► fusion-guard (TCC/DLP + injection-risk audit)
-                                └─► fusion-event triggers Task + pulls context ──► fusion-memory
-                                                                              └─► fusion-agent-studio (task.submit)
-```
-
-- `AuditBridge` → `guard.audit` over UDS (rc.2: direction A — upstream fusion-guard v0.1.1 implemented the fusion-event D-10 frozen contract). Sends `trigger_id`/`event_type`/`target_path`/`target_agent`/`payload`/`node_id`/`tenant_id`; parses `AuditDecision` `{decision: pass|block|challenge, reason, risk_level:int, audit_id}`. Outcomes: `pass` / `block` / `challenge` /
-  `degradedFailOpen` (guard down + `require_guard=false`) / `failClosed` (guard down + `require_guard=true`).
-- `ContextBridge` → `memory.retrieve_context` over UDS at `~/.fusion-memory/fusion-memory.sock` (rc.2: aligned to upstream path). On timeout/not-running: stale-cache or empty fallback (H4 degrade).
-- `Dispatcher` → `task.submit` to `fusion-agent-studio` with `input.event` in snake_case (rc.2: matches `trigger_input.py` frozen contract, issue #250). No retry on failure (R3).
-
-### Reliability mechanisms
-
-- **Token bucket** (`tokenBucketMax`): bounds concurrent trigger chains; excess queues, queue>50 drops oldest (R1).
-- **Idempotency** (H1): `idempotencyKey = SHA256(nodeId | rule_name | event_type | target_path | bucket)`,
-  `bucket = timestamp / debounceMs`. Key recorded at trigger intake → duplicate signals suppressed.
-  Node-scoped (F-IDEM-1): keys never cross-suppress across nodes. Failed `task.submit` marks the key
-  with `taskId="failed"` so restart replay doesn't re-submit (F-IDEM-2).
-- **Restart window rebuild** (R5): debounce state persisted to SQLite WAL on every fire. On restart,
-  `loadFromStore` loads WAL state AND rebuilds the last-60s window from `events.log` (per-rule max ts),
-  merging the greater — so even if a WAL write is lost, the event log backs it up (双保险).
-- **3-state degrade**: each outbound bridge has `connectionFailed` / `timeout` / `ioError` handling
-  with fail-open-or-fail-closed per rule's `require_guard`.
-- **Heartbeat** (E6): IPC server sends `event.heartbeat`; dead connections (no `event.pong` within
-  `heartbeatDeadSec`) are reaped.
-
----
-
-## Configuration
-
-`~/.fusion-event/config.json`:
-
-| Key | Default | Meaning |
-|-----|---------|---------|
-| `sockPath` | `/tmp/fusion-event.sock` | UDS server socket |
-| `fseventsRoot` | `$HOME` | FSEvents watch root |
-| `esEnabled` | `false` | enable EndpointSecurity source (M3; env `FUSION_EVENT_ES_ENABLED=1`) |
-| `esXpcEnabled` | `false` | enable ES XPC server skeleton (Phase-2 L1; env `FUSION_EVENT_ES_XPC_ENABLED=1`) |
-| `nodeId` | hostname | Node identity in emitted events |
-| `studioSock` | `/tmp/fusion-studio.sock` | agent-studio UDS (task.submit) |
-| `guardSock` | `/tmp/fusion-guard.sock` | fusion-guard UDS (guard.audit) |
-| `memorySock` | `~/.fusion-memory/fusion-memory.sock` | fusion-memory UDS (memory.retrieve_context, rc.2 aligned to upstream) |
-| `outboundTimeoutGuard/Memory/Dispatch` | 2 / 3 / 5 sec | per-bridge RPC timeout |
-| `tokenBucketMax` | 5 | max concurrent trigger chains |
-| `heartbeatIntervalSec` / `heartbeatDeadSec` | 15 / 45 | IPC heartbeat + dead-conn reap |
-| `contextCacheTtlSec` | 60 | context bridge cache TTL |
-
----
-
-## RPC API (JSON-RPC 2.0 over UDS, NDJSON-framed)
-
-Every line is one JSON-RPC message (`\n` delimited). Supports **batch requests** (array of
-`RPCRequest` on one line → array of `RPCResponse`; notifications with `id == null` get no response,
-per JSON-RPC 2.0 spec — D5). `rule.add` validates `rule_name`/`target_agent` (1–256 chars),
-`path_pattern` (≤4096, no control chars — S4).
-
-| Method | Params | Returns |
-|--------|--------|---------|
-| `ping` | — | `{pong: true}` |
-| `event.health` | — | `ok, version, uptime_sec, sources{type:{enabled,events_total,errors}}, triggers{submitted,blocked,failed}, sock, node_id` |
-| `event.shutdown` | — | `{ok: true}` (initiates graceful stop) |
-| `rule.add` | `{rule_name, event_type, target_agent, path_pattern?, debounce_ms?, throttle_ms?, enabled?, max_retries?, require_guard?, target_graph_id?}` | `{ok, rule_name}` |
-| `rule.remove` | `{rule_name}` | `{ok}` |
-| `rule.list` | — | `{rules: "[...JSON...]"}` |
-| `rule.reload` | — | `{ok, count}` (reload from SQLite) |
-| `event.replay` | `{since_ts?, limit?}` | `{events: "[...JSON...]"}` |
-| `event.dry_run` | `{since_ts?, limit?}` | `{events: [{event, matched_rules, would_trigger}]}` |
-| `event.subscribe` | — | server pushes `event.notification` lines |
-| `event.pong` | — | heartbeat reply (no response) |
-
-### Quick client (Python)
+Add a rule — trigger a `fusion-code` agent task whenever a Swift file changes:
 
 ```python
 import socket, json
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.connect("/tmp/fusion-event.sock")
-s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"event.health"}) + "\n").encode())
-s.settimeout(3); buf = b""
-while b"\n" not in buf: buf += s.recv(4096)
-print(buf.decode())
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"rule.add","params":{
+    "rule_name":"swift-watch",
+    "event_type":"fileModified",
+    "target_agent":"fusion-code",
+    "path_pattern":"/Users/you/src/**/*.swift",
+    "debounce_ms":300,
+    "require_guard":True
+}})+"\n").encode())
+s.settimeout(3); buf=b""
+while b"\n" not in buf: buf+=s.recv(4096)
+print(json.loads(buf.decode()))
 ```
 
-### Rule example
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"rule.add","params":{
-  "rule_name":"swift-watch",
-  "event_type":"fileModified",
-  "target_agent":"fusion-code",
-  "path_pattern":"/Users/dahai/src/**/*.swift",
-  "debounce_ms":300,
-  "require_guard":true
-}}
-```
-
-`path_pattern` is glob: `*` matches within a segment, `**` across directories, `?` one non-`/` char.
-
----
-
-## Core types
-
-```swift
-public enum SystemEventType: String, Codable, Sendable {
-    case fileModified
-    case processLaunched
-    case processTerminated
-    case clipboardChanged
-    case networkStatusChanged
-    case systemWake
-    case systemSleep
-}
-
-public struct SystemEvent: Codable, Sendable {
-    public let eventId: String
-    public let type: SystemEventType
-    public let targetPath: String?
-    public let timestamp: UInt64
-    public let payload: [String: String]
-    public let nodeId: String
-}
-
-public struct EventRule: Codable, Sendable {
-    public let ruleName: String
-    public let eventType: SystemEventType
-    public let pathPattern: String?
-    public let debounceMs: Int
-    public let throttleMs: Int
-    public let targetAgent: String
-    public let targetGraphId: String?
-    public let enabled: Bool
-    public let maxRetries: Int
-    public let requireGuard: Bool
-}
-```
-
----
-
-## M3 — EndpointSecurity (in-process + degrade)
-
-Privileged process exec/exit/fork auditing via `EndpointSecurity`. Implemented **in-process**:
-`EndpointSecuritySource` calls `es_new_client` + subscribes to `NOTIFY_EXEC/EXIT/FORK` directly
-in the daemon process. Enabled only when `config.esEnabled=true` (default `false`; env
-`FUSION_EVENT_ES_ENABLED=1`).
-
-**Degrade (fail-closed):** `es_new_client` returns `ERR_NOT_ENTITLED` / `ERR_NOT_PERMITTED` /
-`ERR_NOT_PRIVILEGED` when the binary lacks the ES entitlement, TCC approval, or root. The source
-self-disables (`enabled=false`), logs the degrade, and emits no events. `NSWorkspaceSource`
-(always registered) continues to cover `processTerminated`, so process events are never lost —
-just lower-fidelity (no exec/fork, app launches/terminates only).
-
-> **Phase-2 (not implemented):** the PRD plan (§9.5) corrects the architecture — a faithful
-> EndpointSecurity deployment is a **separate System Extension process** + XPC relay back to the
-> daemon, not an in-process `es_enabled` flag. That needs an Xcode System Extension target,
-> `com.apple.developer.endpoint-security.client` entitlement (Apple application), signing +
-> notarization, and `OSSystemExtensionRequest` install. The in-process path here is the
-> environment-verifiable subset; the System Extension topology is documented for when entitlement
-> is granted. See `../architecture/fusion-event-prd-0826.md`.
-
----
-
-## Source layout
+## Architecture
 
 ```
-Sources/fusion-event/
-├── main.swift            # top-level wiring + lifecycle loop
-├── Types.swift           # SystemEvent, EventRule, TriggerSignal, RawEvent
-├── Config.swift          # FusionEventConfig (config.json)
-├── Logging.swift         # os.Logger (com.fusion.event)
-├── Lifecycle.swift       # actor Lifecycle + signal handlers
-├── EventBus.swift        # AsyncStream pub/sub + backpressure
-├── Metrics.swift         # MetricsCollector actor + LatencyHistogram (O1/E9)
-├── RuleEngine.swift      # match + debounce + throttle
-├── RuleStore.swift       # SQLite rules + debounce state (WAL)
-├── Normalizer.swift      # RawEvent → TriggerSignal (+ idempotency key)
-├── EventLog.swift        # rolling JSONL event log
-├── Glob.swift            # glob matcher
-├── RPC.swift             # AnyCodable + JSON-RPC codec
-├── UDSClient.swift       # outbound UDS RPC client + withTimeout
-├── sources/              # EventSource (protocol + SourceRegistry), FSEventsSource, NSWorkspaceSource, NetworkSource, PasteboardSource, EndpointSecuritySource (M3), ESXPCServer/ESXPCProtocol/ESXPCMockClient (Phase-2 L1)
-├── bridges/              # AuditBridge, ContextBridge, Dispatcher
-└── ipc/                  # IPCServer (UDS JSON-RPC server), RPCMethods
+FSEvents / NSWorkspace / NWPathMonitor / Pasteboard
+          │ RawEvent
+          ▼
+      EventBus  ──► backpressure (bounded AsyncStream 8192)
+          ▼
+      RuleEngine ── glob match + debounce + throttle
+          │ TriggerSignal (idempotency key = SHA256(nodeId|rule|type|path|bucket))
+          ▼
+      Dispatcher ── token bucket + crash-safe outbox
+       ┌──────────┼──────────┐
+       ▼          ▼          ▼
+   AuditBridge ContextBridge task.submit
+   → guard      → memory     → agent-studio
 ```
 
-Tests: `GlobTests`, `NormalizerTests`, `RuleEngineTests`, `DispatcherTests`, `ESTests`,
-`ESXPCTests` (Phase-2 L1 XPC channel), `MultiNodeTests` (H2 multi-node + 2000-event stress/backpressure/idempotency/token-bucket),
-`RPCBatchTests` (D5 batch/notification decode + F-16 no-silent-crash + F-11 processLaunched),
-`MetricsTests` (O1/E9 counters + latency histogram P50/P99 + backpressure duration + Sendable snapshot),
-`StressHarnessTests` (M8/O2 env-gated chaos: memory-drift / downstream-kill outbox replay / disk-full degrade / concurrent IPC load),
-`E2EStudioTests` (M9 env-gated E2E: real agent-studio daemon task.submit socket+params+response contract),
-`E2EMemoryTests` (M9 env-gated E2E: real fusion-memory daemon retrieve_context contract — commit + retrieve + delete_scope cleanup),
-`E2EGuardTests` (M9 env-gated E2E: real fusion-guard daemon guard.audit D-10 contract — benign→pass, rm-rf→block),
-`E2ESubscribePushTests` (M9 env-gated E2E: in-process IPCServer #346 push contract — event.subscribe ACK + event.notification fields + heartbeat/pong keepalive),
-`AuditBridgeTests` (rc.3 guard.audit D-10 contract: pass/block/challenge + fail-closed), `ContextBridgeTests` (retrieve_context contract parse + LRU + degrade).
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
----
+## Integration
 
-## Ecosystem references
+`fusion-event` is the trigger-chain owner. Four integration contracts, all E2E-verified:
 
-- PRD (authoritative): `../architecture/fusion-event-prd-0826.md`
-- Union architecture: `../architecture/fusion-union-architecture.md`
-- Downstream: `../fusion-agent-studio`, `../fusion-guard`, `../fusion-memory`, `../fusion-executor`
-- Docs: `docs/api.md` (RPC API), `docs/integration.md` (downstream contracts), `docs/glob-spec.md` (path glob E1)
+| Chain | Direction | Daemon | Contract |
+|-------|-----------|--------|----------|
+| `guard.audit` | outbound | fusion-guard | audit gate (pass/block/challenge) |
+| `memory.retrieve_context` | outbound | fusion-memory | historical context pull |
+| `task.submit` | outbound | fusion-agent-studio | trigger handoff (snake_case `input.event`) |
+| `event.subscribe` / `event.notification` | inbound (server push) | consumers (e.g. fusion-studio) | NDJSON push stream |
+
+See [docs/integration.md](docs/integration.md) for the frozen RPC contracts and [docs/api.md](docs/api.md) for the full inbound RPC reference.
+
+## Documentation
+
+| Doc | Audience | Content |
+|-----|----------|---------|
+| [docs/USAGE.md](docs/USAGE.md) | Customers | install, run, configure, troubleshoot |
+| [docs/INTEGRATION guide](docs/integration.md) | Integrators | downstream daemon contracts |
+| [docs/api.md](docs/api.md) | Integrators | full RPC API reference |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Developers | system design, pipeline, reliability |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Contributors | build, test, lint, extend |
+| [docs/glob-spec.md](docs/glob-spec.md) | All | path-pattern glob rules |
+
+## Status
+
+**`0.1.0-rc.4`** — fourth release candidate. All four integration chains E2E-verified against live upstream daemons / in-process server. 71 unit tests passing, 0 failures.
+
+Known limitations:
+- **EndpointSecurity** privileged source disabled by default — needs Apple `endpoint-security.client` entitlement (pending). `NSWorkspace` provides lower-fidelity process events as degrade.
+- **Release signing** (codesign + notarize) not yet run — Developer ID credentials pending. See [docs/release-signing-checklist.md](docs/release-signing-checklist.md).
+- Single-node only (no HA / leader election).
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).

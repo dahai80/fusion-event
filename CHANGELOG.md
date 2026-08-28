@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **Public release docs**: repository transitioned to public visibility. Added bilingual README (`README.md` English default + `README_CN.md` Chinese, cross-linked). Rewrote `README.md` from an internal milestone ledger into a public-facing quick-start + architecture + integration overview (detailed internals moved to `docs/`). Refreshed stale `CLAUDE.md` (was greenfield-era, contradicted rc.4) to the current implemented state with standalone (non-monorepo) context.
+- **Added docs**: `docs/USAGE.md` (customer install/run/configure/troubleshoot), `docs/ARCHITECTURE.md` (system design), `docs/DEVELOPMENT.md` (build/test/lint/extend/contribute).
+- **PII scrub**: replaced `/Users/dahai/` example paths with `/Users/you/` in tracked docs/tests (real macOS username) ahead of the public flip. Working-tree only — git history retains the originals (username already in the GitHub handle).
+
 ## [0.1.0-rc.4] — 2026-08-28
 
 Patch release. Verifies the guard chain against a real fusion-guard daemon (issue #3 CLOSED upstream), fixes a tenant_id bug discovered by that E2E test, and verifies the subscribe/push contract against fusion-studio's consumer-side implementation (issue #346).

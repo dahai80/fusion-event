@@ -32,7 +32,7 @@ final class GlobTests: XCTestCase {
     }
 
     func testPrefixStarInPath() {
-        XCTAssertTrue(Glob.match(pattern: "/Users/dahai/fe_trig/*", path: "/Users/dahai/fe_trig/hit.txt"))
-        XCTAssertFalse(Glob.match(pattern: "/Users/dahai/fe_trig/*", path: "/Users/dahai/other/hit.txt"))
+        XCTAssertTrue(Glob.match(pattern: "/Users/you/fe_trig/*", path: "/Users/you/fe_trig/hit.txt"))
+        XCTAssertFalse(Glob.match(pattern: "/Users/you/fe_trig/*", path: "/Users/you/other/hit.txt"))
     }
 }
