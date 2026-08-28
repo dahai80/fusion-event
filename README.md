@@ -8,7 +8,7 @@ filters through a Rule Engine (debounce + throttle + glob), and emits Agent Task
 to downstream daemons (`fusion-agent-studio`), with permission audit (`fusion-guard`) and
 historical context (`fusion-memory`) on the path.
 
-> **Status: `0.1.0-rc.2`** — second release candidate. Upstream contract alignment (guard.evaluate / retrieve_context / task.submit snake_case) so all three integration chains work end-to-end; CI + swift-format lint gate added. ES entitlement + release signing still pending (see CHANGELOG.md + docs/release-signing-checklist.md).
+> **Status: `0.1.0-rc.3`** — third release candidate. Guard chain corrected to `guard.audit` (direction A, fusion-guard v0.1.1 D-10 frozen contract); memory `retrieve_context` + task.submit snake_case aligned in rc.2. All three integration chains now match upstream source. ES entitlement + release signing still pending (see CHANGELOG.md + docs/release-signing-checklist.md).
 
 - **Language**: Swift 6 (strict concurrency, `actor`-isolated).
 - **IPC**: JSON-RPC 2.0 over Unix Domain Socket, NDJSON-framed.
@@ -166,7 +166,7 @@ FSEvents ──► fusion-event ──► fusion-guard (TCC/DLP + injection-risk
                                                                               └─► fusion-agent-studio (task.submit)
 ```
 
-- `AuditBridge` → `guard.evaluate` over UDS (rc.2: was `guard.audit`, which does not exist upstream). Sends serialized event JSON as `content` with `content_type: "json"`; maps upstream `SafetyAction` (Allow→pass, Preview→challenge, Redact→block, Block→block). Outcomes: `pass` / `block` / `challenge` /
+- `AuditBridge` → `guard.audit` over UDS (rc.2: direction A — upstream fusion-guard v0.1.1 implemented the fusion-event D-10 frozen contract). Sends `trigger_id`/`event_type`/`target_path`/`target_agent`/`payload`/`node_id`/`tenant_id`; parses `AuditDecision` `{decision: pass|block|challenge, reason, risk_level:int, audit_id}`. Outcomes: `pass` / `block` / `challenge` /
   `degradedFailOpen` (guard down + `require_guard=false`) / `failClosed` (guard down + `require_guard=true`).
 - `ContextBridge` → `memory.retrieve_context` over UDS at `~/.fusion-memory/fusion-memory.sock` (rc.2: aligned to upstream path). On timeout/not-running: stale-cache or empty fallback (H4 degrade).
 - `Dispatcher` → `task.submit` to `fusion-agent-studio` with `input.event` in snake_case (rc.2: matches `trigger_input.py` frozen contract, issue #250). No retry on failure (R3).
@@ -200,7 +200,7 @@ FSEvents ──► fusion-event ──► fusion-guard (TCC/DLP + injection-risk
 | `esXpcEnabled` | `false` | enable ES XPC server skeleton (Phase-2 L1; env `FUSION_EVENT_ES_XPC_ENABLED=1`) |
 | `nodeId` | hostname | Node identity in emitted events |
 | `studioSock` | `/tmp/fusion-studio.sock` | agent-studio UDS (task.submit) |
-| `guardSock` | `/tmp/fusion-guard.sock` | fusion-guard UDS (guard.evaluate) |
+| `guardSock` | `/tmp/fusion-guard.sock` | fusion-guard UDS (guard.audit) |
 | `memorySock` | `~/.fusion-memory/fusion-memory.sock` | fusion-memory UDS (memory.retrieve_context, rc.2 aligned to upstream) |
 | `outboundTimeoutGuard/Memory/Dispatch` | 2 / 3 / 5 sec | per-bridge RPC timeout |
 | `tokenBucketMax` | 5 | max concurrent trigger chains |

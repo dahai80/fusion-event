@@ -2,10 +2,10 @@ import XCTest
 import os.lock
 @testable import fusion_event
 
-// Verifies AuditBridge contract against fusion-guard guard.evaluate
-// (issue #3, direction B: fusion-event adapts to upstream frozen contract).
-// Mock guard server returns GuardVerdict shape; asserts action mapping:
-// Allow→pass, Block→block, Redact→block, Preview→challenge.
+// Verifies AuditBridge contract against fusion-guard guard.audit
+// (issue #3 CLOSED: upstream v0.1.1 implements fusion-event D-10 frozen contract).
+// Mock guard server returns AuditDecision shape {decision, reason, risk_level:int, audit_id, trigger_id};
+// asserts decision mapping: pass→pass, block→block, challenge→challenge.
 // NOT degrade-path: real socket + real response parse.
 
 private final class MockGuard: @unchecked Sendable {
@@ -128,49 +128,49 @@ final class AuditBridgeTests: XCTestCase {
         return (path, m)
     }
 
-    func testEvaluateAllowMapsToPass() async throws {
-        let v = #"{"action":"Allow","risk_level":"L1","reason":"ok","stage":"Stage1","requires_approval":false,"redacted_content":null,"seatbelt_required":false,"action_id":"aid-1","verdict_epoch":1,"verdict_ttl_secs":30,"inferred_category":"file"}"#
+    func testAuditPassMapsToPass() async throws {
+        let v = #"{"decision":"pass","reason":"ok","risk_level":1,"audit_id":"aid-1","trigger_id":"t1"}"#
         let (path, mock) = try startMockGuard(verdict: v)
         defer { mock.stop() }
         let audit = AuditBridge(sockPath: path, timeoutSec: 2)
         let outcome = await audit.audit(signal: makeSignal())
-        guard case .pass(let res) = outcome else { return XCTFail("Allow must map to pass, got \(outcome)") }
+        guard case .pass(let res) = outcome else { return XCTFail("decision=pass must map to pass, got \(outcome)") }
         XCTAssertEqual(res.decision, .pass)
         XCTAssertEqual(res.riskLevel, 1)
         XCTAssertEqual(res.auditId, "aid-1")
         await audit.close()
     }
 
-    func testEvaluateBlockMapsToBlock() async throws {
-        let v = #"{"action":"Block","risk_level":"L4","reason":"malicious","stage":"Stage2","requires_approval":true,"redacted_content":null,"seatbelt_required":true,"action_id":"aid-2","verdict_epoch":1,"verdict_ttl_secs":30,"inferred_category":"shell"}"#
+    func testAuditBlockMapsToBlock() async throws {
+        let v = #"{"decision":"block","reason":"malicious","risk_level":3,"audit_id":"aid-2","trigger_id":"t1"}"#
         let (path, mock) = try startMockGuard(verdict: v)
         defer { mock.stop() }
         let audit = AuditBridge(sockPath: path, timeoutSec: 2)
         let outcome = await audit.audit(signal: makeSignal())
-        guard case .block(let res) = outcome else { return XCTFail("Block must map to block, got \(outcome)") }
+        guard case .block(let res) = outcome else { return XCTFail("decision=block must map to block, got \(outcome)") }
         XCTAssertEqual(res.decision, .block)
-        XCTAssertEqual(res.riskLevel, 4)
+        XCTAssertEqual(res.riskLevel, 3)
         await audit.close()
     }
 
-    func testEvaluateRedactMapsToBlock() async throws {
-        let v = #"{"action":"Redact","risk_level":"L3","reason":"secret","stage":"Stage1","requires_approval":false,"redacted_content":"<redacted>","seatbelt_required":false,"action_id":"aid-3","verdict_epoch":1,"verdict_ttl_secs":30,"inferred_category":"text"}"#
+    func testAuditChallengeMapsToChallenge() async throws {
+        let v = #"{"decision":"challenge","reason":"suspicious","risk_level":2,"audit_id":"aid-3","trigger_id":"t1"}"#
         let (path, mock) = try startMockGuard(verdict: v)
         defer { mock.stop() }
         let audit = AuditBridge(sockPath: path, timeoutSec: 2)
         let outcome = await audit.audit(signal: makeSignal())
-        guard case .block = outcome else { return XCTFail("Redact must map to block (content high-risk), got \(outcome)") }
-        await audit.close()
-    }
-
-    func testEvaluatePreviewMapsToChallenge() async throws {
-        let v = #"{"action":"Preview","risk_level":"L2","reason":"suspicious","stage":"Stage1","requires_approval":true,"redacted_content":null,"seatbelt_required":false,"action_id":"aid-4","verdict_epoch":1,"verdict_ttl_secs":30,"inferred_category":"code"}"#
-        let (path, mock) = try startMockGuard(verdict: v)
-        defer { mock.stop() }
-        let audit = AuditBridge(sockPath: path, timeoutSec: 2)
-        let outcome = await audit.audit(signal: makeSignal())
-        guard case .challenge(let res) = outcome else { return XCTFail("Preview must map to challenge, got \(outcome)") }
+        guard case .challenge(let res) = outcome else { return XCTFail("decision=challenge must map to challenge, got \(outcome)") }
         XCTAssertEqual(res.decision, .challenge)
+        await audit.close()
+    }
+
+    func testAuditUnknownDecisionFailsClosedToBlock() async throws {
+        let v = #"{"decision":"garbage","reason":"bad","risk_level":0,"audit_id":"aid-4","trigger_id":"t1"}"#
+        let (path, mock) = try startMockGuard(verdict: v)
+        defer { mock.stop() }
+        let audit = AuditBridge(sockPath: path, timeoutSec: 2)
+        let outcome = await audit.audit(signal: makeSignal())
+        guard case .block = outcome else { return XCTFail("unknown decision must fail-closed to block, got \(outcome)") }
         await audit.close()
     }
 }
