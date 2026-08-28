@@ -9,9 +9,10 @@ Patch release. Corrects the guard-chain contract direction misjudged in rc.2.
 
 ### Verification
 - `swift build` (debug + release): green
-- `swift test`: 66 passing, 5 skipped, 0 failures
+- `swift test`: 67 passing, 6 skipped, 0 failures
 - `swift-format lint`: exit 0
 - memory + task.submit chains unchanged from rc.2 (already verified correct against upstream source)
+- **memory.retrieve_context real-daemon E2E** (issue #4 CLOSED, fusion-memory): added `E2EMemoryTests.swift` — env-gated (`FUSION_EVENT_E2E=1`), seeds a test Interaction via `commit` to a real fusion-memory daemon (UDS), calls fusion-event's own `ContextBridge.retrieveContext`, asserts non-empty context contains committed marker + `interaction_id` present in `memory_ids` + `cache_hit=false`, then cleans up via `delete_scope` (confirm=true). Passed against real fusion-memory + fusion-mlx embedding backend.
 
 ## [0.1.0-rc.2] — 2026-08-28
 

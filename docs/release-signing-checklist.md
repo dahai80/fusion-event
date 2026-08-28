@@ -99,7 +99,7 @@ PRD/架构要求 4 个集成点。全部源码坐实 + issue 推进上游:
 |--------|------|-------|------|------|
 | task.submit | 下游 → fusion-agent-studio | agent-studio #250 CLOSED | rc.2 已对齐: `input.event` snake_case 匹配 `trigger_input.py` 冻结契约; E2E 已验 (M9) | 无 |
 | guard.audit | 上游 ← fusion-guard | fusion-guard #3 CLOSED | rc.2 已对齐: 方向 A, 上游 v0.1.1 实现 D-10 冻结契约 (`guard.audit` + `AuditDecision`); fusion-event 调 audit 传 trigger_id/event_type/target_path/target_agent/payload/node_id/tenant_id | 无 |
-| memory.retrieve_context | 上游 ← fusion-memory | fusion-memory #4 CLOSED | rc.2 已对齐: 上游加 `memory.retrieve_context_contract` (method/params/response 全匹配); socket 路径 fusion-event 适配 `~/.fusion-memory/fusion-memory.sock` | 无 |
+| memory.retrieve_context | 上游 ← fusion-memory | fusion-memory #4 CLOSED | rc.3 已对齐 + 真实 E2E 验证: 上游加 `memory.retrieve_context_contract` (method/params/response 全匹配); socket 路径 fusion-event 适配 `~/.fusion-memory/fusion-memory.sock`; `E2EMemoryTests.swift` 真实 daemon commit+retrieve+delete_scope 全通过 | 无 |
 | event.subscribe / event.notification | 下游 → fusion-studio (消费方) | fusion-studio #346 OPEN | 新提, 消费方未实现 | studio 需加 EventBridge UDS 长连 + NDJSON 推流解析; fusion-event 侧已实现 push (camelCase, PRD 契约) |
 
 issue 链接:
