@@ -35,11 +35,21 @@ rotate_log() {
 }
 
 do_start() {
-    exec 9>"$DATA_DIR.lock"
-    if ! flock -n 9; then
-        echo "ERROR: another start.sh instance holding lock, abort (M5)" >&2
-        exit 1
+    # mkdir-based single-instance lock (POSIX atomic, no external binary).
+    # macOS lacks util-linux flock, so a directory lock is the portable choice.
+    # Stale-pid recovery: if the holder died without releasing, reclaim the lock.
+    local lock_dir="$DATA_DIR.lock"
+    if ! mkdir "$lock_dir" 2>/dev/null; then
+        if [[ -f "$lock_dir/pid" ]] && ! kill -0 "$(cat "$lock_dir/pid" 2>/dev/null)" 2>/dev/null; then
+            rm -rf "$lock_dir"
+            mkdir "$lock_dir" 2>/dev/null || { echo "ERROR: cannot reclaim lock, abort (M5)" >&2; exit 1; }
+        else
+            echo "ERROR: another start.sh instance holding lock, abort (M5)" >&2
+            exit 1
+        fi
     fi
+    echo "$$" > "$lock_dir/pid"
+    trap 'rmdir "$lock_dir" 2>/dev/null' EXIT
     local bin
     bin="$(resolve_bin)"
     if [[ -z "$bin" ]]; then
