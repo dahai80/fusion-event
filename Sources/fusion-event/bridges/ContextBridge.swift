@@ -146,4 +146,12 @@ public actor ContextBridge {
         await client?.close()
         client = nil
     }
+
+    public func close() async {
+        await client?.close()
+        client = nil
+        cache.removeAll()
+        cacheOrder.removeAll()
+        FusionLog.bridge.info("context bridge closed, cache cleared")
+    }
 }

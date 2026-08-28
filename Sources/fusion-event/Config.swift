@@ -27,7 +27,7 @@ struct FusionEventConfig: Codable, Sendable {
     static let `default` = FusionEventConfig(
         sockPath: ProcessInfo.processInfo.environment["FUSION_EVENT_SOCK"] ?? "/tmp/fusion-event.sock",
         guardSock: ProcessInfo.processInfo.environment["FUSION_GUARD_SOCK"] ?? "/tmp/fusion-guard.sock",
-        memorySock: ProcessInfo.processInfo.environment["FUSION_MEMORY_SOCK"] ?? "/tmp/fusion-memory.sock",
+        memorySock: ProcessInfo.processInfo.environment["FUSION_MEMORY_SOCK"] ?? "\(NSHomeDirectory())/.fusion-memory/fusion-memory.sock",
         studioSock: ProcessInfo.processInfo.environment["FUSION_STUDIO_SOCK"] ?? "/tmp/fusion-studio.sock",
         dataDir: ProcessInfo.processInfo.environment["FUSION_EVENT_DATA"] ?? "\(NSHomeDirectory())/.fusion-event",
         nodeId: ProcessInfo.processInfo.environment["FUSION_NODE_ID"] ?? "auto",

@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.3.app/Contents/Developer || true
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build (debug)
+        run: swift build
+
+      - name: Build (release)
+        run: swift build -c release
+
+      - name: Test
+        run: swift test
+        env:
+          FUSION_EVENT_STRESS: ""
+          FUSION_EVENT_E2E: ""
+
+      - name: Verify test count
+        run: |
+          output=$(swift test 2>&1)
+          echo "$output"
+          echo "$output" | rg -c "Executed [0-9]+ tests, with 0 failures" || {
+            echo "test verification failed"
+            exit 1
+          }
+
+  lint:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install swift-format
+        run: brew install swift-format
+
+      - name: Format check
+        run: swift-format lint -r Sources Tests --configuration .swift-format

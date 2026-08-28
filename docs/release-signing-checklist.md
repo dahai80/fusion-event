@@ -91,14 +91,21 @@ Apple 批准后:
 
 每完成一项告诉我, 我核状态 + 更新此表。
 
-## 联调 issue 推进状态 (c)
+## 上下游集成对接状态 (PRD + union 架构)
 
-三链契约 drift 全部源码坐实 + comment 推进上游:
+PRD/架构要求 4 个集成点。全部源码坐实 + issue 推进上游:
 
-| 链 | issue | drift | comment |
-|----|-------|-------|---------|
-| task.submit | agent-studio #250 | input event 字段名 (camelCase vs snake_case) | https://github.com/dahai80/fusion-agent-studio/issues/250#issuecomment-5436582134 |
-| guard.audit | fusion-guard #3 | 方法名 (`guard.audit` 不存在, `guard.evaluate` 语义错位: 内容审计 vs 事件门禁) + response 形状 | https://github.com/dahai80/fusion-guard/issues/3#issuecomment-5437537670 + socket 自答 https://github.com/dahai80/fusion-guard/issues/3#issuecomment-5437542813 |
-| memory.retrieve_context | fusion-memory #4 | 4 处 drift: 方法名 + 参数名 + response 结构 + socket 路径 (`/tmp/` vs `~/.fusion-memory/`) | https://github.com/dahai80/fusion-memory/issues/4#issuecomment-5436646138 + socket 自答 https://github.com/dahai80/fusion-memory/issues/4#issuecomment-5437549792 |
+| 集成点 | 方向 | issue | 状态 | 残留 |
+|--------|------|-------|------|------|
+| task.submit | 下游 → fusion-agent-studio | agent-studio #250 OPEN | E2E 已验 (M9), task_id 返回 | 字段名 drift (camelCase vs snake_case), 不阻塞 |
+| guard.audit | 上游 ← fusion-guard | fusion-guard #3 OPEN | drift 未解: 上游无 `guard.audit`, 有 `guard.evaluate` (内容审计语义错位) | 等上游定方向 (A 上游加 audit / B fusion-event 适配 evaluate) |
+| memory.retrieve_context | 上游 ← fusion-memory | fusion-memory #4 CLOSED (COMPLETED) | 契约已对齐: 上游加 `memory.retrieve_context_contract` (method/params/response 全匹配) | socket 路径 drift: fusion-event `/tmp/` vs memory `~/.fusion-memory/`, fusion-event 侧适配 |
+| event.subscribe / event.notification | 下游 → fusion-studio (消费方) | fusion-studio #346 OPEN | 新提, 消费方未实现 | studio 需加 EventBridge UDS 长连 + NDJSON 推流解析 |
 
-guard/memory 两链当前 happy-path 不通 (guard 方法不存在, memory 方法名/路径 drift)。task.submit 唯一成熟链, E2E 已验 (M9)。商用发布前等上游响应决定方向 (A 上游改 vs B fusion-event 改)。
+issue 链接:
+- task.submit: https://github.com/dahai80/fusion-agent-studio/issues/250
+- guard.audit: https://github.com/dahai80/fusion-guard/issues/3
+- memory.retrieve_context: https://github.com/dahai80/fusion-memory/issues/4
+- event.subscribe: https://github.com/dahai80/fusion-studio/issues/346
+
+task.submit 唯一成熟链 (E2E 验过)。memory 契约闭环, 仅 socket 路径 fusion-event 自适配。guard 等上游。studio 消费方待 studio 侧实现。商用发布前硬阻塞: guard 链 + memory socket + 签名凭据。

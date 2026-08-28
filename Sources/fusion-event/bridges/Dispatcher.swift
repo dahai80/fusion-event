@@ -265,12 +265,12 @@ public actor Dispatcher: TriggerSink {
 
     private func eventDict(_ e: SystemEvent) -> [String: Any] {
         [
-            "eventId": e.eventId,
+            "event_id": e.eventId,
             "type": e.type.rawValue,
-            "targetPath": e.targetPath ?? "",
+            "target_path": e.targetPath ?? "",
             "timestamp": e.timestamp,
             "payload": e.payload,
-            "nodeId": e.nodeId
+            "node_id": e.nodeId
         ]
     }
 

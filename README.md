@@ -8,7 +8,7 @@ filters through a Rule Engine (debounce + throttle + glob), and emits Agent Task
 to downstream daemons (`fusion-agent-studio`), with permission audit (`fusion-guard`) and
 historical context (`fusion-memory`) on the path.
 
-> **Status: `0.1.0-rc.1`** — first release candidate. Code-complete through 4 audit rounds; ES entitlement + release signing + guard/memory E2E pending (see CHANGELOG.md + docs/release-signing-checklist.md).
+> **Status: `0.1.0-rc.2`** — second release candidate. Upstream contract alignment (guard.evaluate / retrieve_context / task.submit snake_case) so all three integration chains work end-to-end; CI + swift-format lint gate added. ES entitlement + release signing still pending (see CHANGELOG.md + docs/release-signing-checklist.md).
 
 - **Language**: Swift 6 (strict concurrency, `actor`-isolated).
 - **IPC**: JSON-RPC 2.0 over Unix Domain Socket, NDJSON-framed.
@@ -32,9 +32,9 @@ M0–M4 implemented and verified:
 | M6 | Architecture audit hardening (A/R/E): A2 nodeId persist UUID, A3 true ingest decouple (bounded stream + `drainIngest`), A4 ContextBridge LRU bound, A6/R3 monotonic dedup, A10 backpressure回流 (observe/notify), R1 FSEvents whitelist, R2 dispatch capacity configurable, R4 crash-safe outbox + replay, R5 WAL checkpoint, R6/R10 shutdown hard timeout + drain, R7 source throttle, R8 mountObserver registered, R9 EventLog atomic rotate, E1 RuleStore concurrency, E2 UPSERT preserve created_at, E3 migration versioning, E5 buffered recv, E6 maxRetries honored, E8 pasteboard poll configurable | done — see `docs/audit-fixes-0827.md` §第二轮; A1/A7/A8/A9/E4/E7/E9 deferred (design/external/low-pri) |
 | M7 | Production-readiness audit hardening (P0–P3): F-CRASH-1 FSEvents concurrent-mutate crash (snapshot flush), F-CRASH-2 outbox failed-replay delete (fail-keep), F-CRASH-3 atomic+fsync write, S0 guard-block no fail-open, P4-1 bounded fan-out, F-1/2/3 source lifecycle+UAF, F-IDEM-1/2 nodeId idempotency + failed-occupy, F-DROP-1 overflow-to-outbox, F-PERSIST-1/2/3/4/5/6 migration+WAL FULL+fsync+archive scan, F-EVICT-1/2 true LRU + O(n) purge, F-TIMEOUT-1 configurable recv timeout, D2/D3 shutdown RPC + real nodeId, S1 0600 files, S3 replay cap, F-5/6/10/11/12/13/15/16 source+IPC fixes, F-EVICT-2, P4-2/4, O4/O5/O8/O9/O10 ops, D5 batch+notification, S4 rule validation | done — see `docs/audit-fixes-0827.md` §第三轮; S5/S6/D4 ES entitlement, A2-3 HA, end-to-end联调 deferred (external) |
 | M8 | Release engineering + observability: O1/E9 in-process metrics pipeline (`MetricsCollector` actor, counters + latency histogram P50/P99 + backpressure duration, `event.metrics` RPC), codesign/notarize script (`scripts/sign.sh` + entitlements, hardened runtime, ES entitlement commented pending Apple approval), chaos/long-run stress harness (`StressHarnessTests`, env-gated `FUSION_EVENT_STRESS`, 4 tests: memory-drift / downstream-kill outbox replay / disk-full degrade / concurrent IPC load) | done — see `docs/audit-fixes-0827.md` §第四轮; S5/S6/D4 ES entitlement, A2-3 HA, end-to-end联调 still external (issues #3/#4/#250) |
-| M9 | E2E integration smoke (task.submit, the only mature chain): env-gated test `E2EStudioTests` connects fusion-event full chain to a **real** agent-studio daemon over UDS, pushes file events, verifies `task.submit` accepted + `task_id` returned (submitted>0, failed==0). Proves socket+params+response contract end-to-end. guard (#3) + memory (#4) chains unverified — upstream contract drift filed (method/param/response shape). | done — see `docs/audit-fixes-0827.md` §第五轮; guard/memory联调 awaiting upstream (issues #3/#4), task.submit field-name drift issue #250 |
+| M9 | E2E integration smoke (task.submit): env-gated test `E2EStudioTests` connects fusion-event full chain to a **real** agent-studio daemon over UDS, pushes file events, verifies `task.submit` accepted + `task_id` returned (submitted>0, failed==0). Proves socket+params+response contract end-to-end. | done — task.submit `input.event` now snake_case (issue #250 fixed rc.2); guard.evaluate (#3) + retrieve_context (#4) chains contract-verified via MockGuard/MockMemory unit tests rc.2, real-daemon E2E still pending |
 
-Tests: 58 unit tests, all passing (`swift test`), ~11s. 4 stress + 1 E2E skipped by default — stress via `FUSION_EVENT_STRESS=1 swift test --filter StressHarnessTests`; E2E via `FUSION_EVENT_E2E=1 swift test --filter E2EStudioTests` (requires real agent-studio daemon on `/tmp/fusion-studio.sock`).
+Tests: 66 unit tests, all passing (`swift test`), ~2s. 4 stress + 1 E2E skipped by default — stress via `FUSION_EVENT_STRESS=1 swift test --filter StressHarnessTests`; E2E via `FUSION_EVENT_E2E=1 swift test --filter E2EStudioTests` (requires real agent-studio daemon on `/tmp/fusion-studio.sock`).
 
 ### Phase-2 — System Extension + XPC (L1 skeleton, contract frozen)
 
@@ -166,10 +166,10 @@ FSEvents ──► fusion-event ──► fusion-guard (TCC/DLP + injection-risk
                                                                               └─► fusion-agent-studio (task.submit)
 ```
 
-- `AuditBridge` → `guard.audit` over UDS. Outcomes: `pass` / `block` / `challenge` /
+- `AuditBridge` → `guard.evaluate` over UDS (rc.2: was `guard.audit`, which does not exist upstream). Sends serialized event JSON as `content` with `content_type: "json"`; maps upstream `SafetyAction` (Allow→pass, Preview→challenge, Redact→block, Block→block). Outcomes: `pass` / `block` / `challenge` /
   `degradedFailOpen` (guard down + `require_guard=false`) / `failClosed` (guard down + `require_guard=true`).
-- `ContextBridge` → `memory.retrieve_context`. On timeout/not-running: stale-cache or empty fallback (H4 degrade).
-- `Dispatcher` → `task.submit` to `fusion-agent-studio`. No retry on failure (R3).
+- `ContextBridge` → `memory.retrieve_context` over UDS at `~/.fusion-memory/fusion-memory.sock` (rc.2: aligned to upstream path). On timeout/not-running: stale-cache or empty fallback (H4 degrade).
+- `Dispatcher` → `task.submit` to `fusion-agent-studio` with `input.event` in snake_case (rc.2: matches `trigger_input.py` frozen contract, issue #250). No retry on failure (R3).
 
 ### Reliability mechanisms
 
@@ -200,8 +200,8 @@ FSEvents ──► fusion-event ──► fusion-guard (TCC/DLP + injection-risk
 | `esXpcEnabled` | `false` | enable ES XPC server skeleton (Phase-2 L1; env `FUSION_EVENT_ES_XPC_ENABLED=1`) |
 | `nodeId` | hostname | Node identity in emitted events |
 | `studioSock` | `/tmp/fusion-studio.sock` | agent-studio UDS (task.submit) |
-| `guardSock` | `/tmp/fusion-guard.sock` | fusion-guard UDS (guard.audit) |
-| `memorySock` | `/tmp/fusion-memory.sock` | fusion-memory UDS (memory.retrieve_context) |
+| `guardSock` | `/tmp/fusion-guard.sock` | fusion-guard UDS (guard.evaluate) |
+| `memorySock` | `~/.fusion-memory/fusion-memory.sock` | fusion-memory UDS (memory.retrieve_context, rc.2 aligned to upstream) |
 | `outboundTimeoutGuard/Memory/Dispatch` | 2 / 3 / 5 sec | per-bridge RPC timeout |
 | `tokenBucketMax` | 5 | max concurrent trigger chains |
 | `heartbeatIntervalSec` / `heartbeatDeadSec` | 15 / 45 | IPC heartbeat + dead-conn reap |
