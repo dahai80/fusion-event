@@ -7,9 +7,14 @@ final class MockStudio: @unchecked Sendable {
     private var listenFd: Int32 = -1
     private var serverTask: Task<Void, Never>?
     private let connLock = OSAllocatedUnfairLock(initialState: [Int32]())
+    private let bodyLock = OSAllocatedUnfairLock(initialState: [String]())
 
     init(sockPath: String) {
         self.sockPath = sockPath
+    }
+
+    var lastBodies: [String] {
+        bodyLock.withLock { $0 }
     }
 
     func start() throws {
@@ -57,6 +62,9 @@ final class MockStudio: @unchecked Sendable {
                     return
                 }
                 if byte[0] == 0x0A { gotLine = true } else { buf.append(byte[0]) }
+            }
+            if let s = String(data: buf, encoding: .utf8) {
+                bodyLock.withLock { $0.append(s) }
             }
             let idStr = extractId(buf)
             let resp = #"{"jsonrpc":"2.0","id":\#(idStr),"result":{"task":{"task_id":"t1"}}}"#

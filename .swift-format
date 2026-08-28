@@ -1,0 +1,29 @@
+{
+    "version": 1,
+    "fileScopedDeclarationPrivacy": {
+        "accessLevel": "private"
+    },
+    "indentation": {
+        "spaces": 4
+    },
+    "lineLength": 200,
+    "maximumBlankLines": 1,
+    "respectsExistingLineBreaks": true,
+    "multiElementCollectionTrailingCommas": false,
+    "rules": {
+        "AlwaysUseLowerCamelCase": false,
+        "AllPublicDeclarationsHaveDocumentation": false,
+        "BeginDocumentationCommentWithOneLineSummary": false,
+        "DoNotUseSemicolons": false,
+        "NeverForceUnwrap": false,
+        "NeverUseForceTry": false,
+        "NeverUseImplicitlyUnwrappedOptionals": false,
+        "NoLeadingUnderscores": false,
+        "NoVoidReturnOnFunctionSignature": true,
+        "OneVariableDeclarationPerLine": true,
+        "OnlyOneTrailingClosureArgument": true,
+        "ReturnVoidInsteadOfEmptyTuple": true,
+        "UseEarlyExits": false,
+        "UseLetInEveryBoundCaseVariable": true
+    }
+}

@@ -76,4 +76,22 @@ final class DispatcherTests: XCTestCase {
         XCTAssertNotNil(stats["dropped"])
         XCTAssertNotNil(stats["retried"])
     }
+
+    // task.submit input.event must use snake_case (event_id/target_path/node_id)
+    // to match agent-studio trigger_input.py frozen contract (issue #250).
+    func testTaskSubmitInputEventUsesSnakeCase() async throws {
+        let studioPath = try startMockStudio()
+        let dispatcher = makeDispatcher(sockPath: studioPath)
+        let audit = AuditBridge(sockPath: "/tmp/fe-noaudit-\(UUID().uuidString).sock", timeoutSec: 1)
+        let ctx = ContextBridge(sockPath: "/tmp/fe-nomem-\(UUID().uuidString).sock", timeoutSec: 1, ttlSec: 60)
+        await dispatcher.setBridges(audit: audit, context: ctx)
+        await dispatcher.onTrigger(makeSignal())
+        let stats = await dispatcher.stats()
+        XCTAssertEqual(stats["submitted"], 1)
+        let bodies = mock?.lastBodies ?? []
+        XCTAssertTrue(bodies.contains { $0.contains("event_id") }, "task.submit input.event must use snake_case event_id (issue #250)")
+        XCTAssertTrue(bodies.contains { $0.contains("target_path") }, "task.submit input.event must use snake_case target_path")
+        XCTAssertTrue(bodies.contains { $0.contains("node_id") }, "task.submit input.event must use snake_case node_id")
+        XCTAssertFalse(bodies.contains { $0.contains("eventId") }, "camelCase eventId must NOT appear in task.submit input (drift fixed)")
+    }
 }

@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.1.0-rc.2] — 2026-08-28
+
+Patch release. Upstream contract alignment (direction B: fusion-event adapts to frozen upstream contracts) so all three integration chains actually work end-to-end. Adds CI + lint gating.
+
+### Fixed — upstream contract alignment
+- **guard chain** (issue #3, fusion-guard): AuditBridge now calls `guard.evaluate` (was `guard.audit`, which does not exist upstream). Serializes event to JSON `content` string with `content_type: "json"`, maps upstream `SafetyAction` (Allow/Preview/Redact/Block) to internal `GuardDecision` (pass/challenge/block/block), parses `risk_level` (L-string → Int) and `action_id` (was `audit_id`). Four contract tests added (MockGuard UDS server).
+- **memory chain** (issue #4 CLOSED upstream, fusion-memory): ContextBridge socket default aligned to upstream `~/.fusion-memory/fusion-memory.sock` (was `/tmp/fusion-memory.sock`). `retrieve_context` method/params/response already matched upstream contract; added missing `close()` for clean lifecycle. Three contract tests added (MockMemory UDS server): response parse, LRU cache hit, degrade-on-absent.
+- **task.submit chain** (issue #250, fusion-agent-studio): Dispatcher `eventDict` now serializes `input.event` in snake_case (`event_id`, `target_path`, `node_id`) to match upstream `trigger_input.py` frozen contract (was camelCase). Regression test added. IPCServer `event.notification` push keeps camelCase (PRD + studio #346 consumer contract).
+
+### Added
+- CI workflow (`.github/workflows/ci.yml`): macos-14, build debug+release, swift test + test-count verify, swift-format lint gate.
+- `.swift-format` (swift-format 603.0.0 schema): lineLength 200, 4-space indent, rules matched to existing codebase convention.
+- 8 new contract tests (AuditBridge ×4, ContextBridge ×3, Dispatcher snake_case ×1). Total 66 passing (5 skipped).
+
+### Known limitations
+- EndpointSecurity privileged source still disabled — ES entitlement pending Apple approval.
+- No HA / leader election — single-node only.
+- Codesign/notarize not yet run — release signing credentials pending.
+- 213 swift-format advisory warnings remain (built-in formatter Indentation/AddLines/RemoveLine suggestions on pre-existing codebase style; non-toggleable, lint exits 0). Not introduced by this change.
+
+### Audit history
+- rc.2 audit: 3-chain contract alignment verified against upstream sources (guard.evaluate, retrieve_context, trigger_input.py). See docs/release-signing-checklist.md.
+
 ## [0.1.0-rc.1] — 2026-08-27
 
 First release candidate. macOS-native reactive event daemon — ecosystem perception layer.
