@@ -60,7 +60,7 @@ final class E2EGuardTests: XCTestCase {
 
         let audit = AuditBridge(sockPath: sock, timeoutSec: 5)
         let signal = makeSignal(
-            targetPath: "/Users/dahai/fusion/fusion-event/Sources/fusion-event/bridges/AuditBridge.swift",
+            targetPath: "/Users/you/fusion/fusion-event/Sources/fusion-event/bridges/AuditBridge.swift",
             nodeId: "e2e-guard-n1"
         )
         let outcome = await audit.audit(signal: signal)

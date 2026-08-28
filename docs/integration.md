@@ -25,7 +25,7 @@ Socket: `guardSock` (default `/tmp/fusion-guard.sock`). Timeout 2s (H4).
 {"jsonrpc":"2.0","id":N,"method":"guard.audit","params":{
   "trigger_id":"<uuid>",
   "event_type":"fileModified",
-  "target_path":"/Users/dahai/src/a.swift",
+  "target_path":"/Users/you/src/a.swift",
   "target_agent":"fusion-code",
   "payload":{"key":"value"},
   "node_id":"macbook"
@@ -50,7 +50,7 @@ Bucketed TTL cache (default 60s); on miss/timeout falls back to stale cache or e
 ```json
 {"jsonrpc":"2.0","id":N,"method":"memory.retrieve_context","params":{
   "trigger_id":"<uuid>",
-  "query":"/Users/dahai/src/a.swift|fileModified",
+  "query":"/Users/you/src/a.swift|fileModified",
   "top_k":5,
   "node_id":"macbook"
 }}
@@ -71,7 +71,7 @@ queue > 50 drops oldest (R1). No retry on failure (R3).
 ```json
 {"jsonrpc":"2.0","id":N,"method":"task.submit","params":{
   "title":"event:<rule_name>",
-  "description":"fileModified @ /Users/dahai/src/a.swift",
+  "description":"fileModified @ /Users/you/src/a.swift",
   "agent_id":"fusion-code",
   "graph_id":"",
   "input":"<JSON string: {trigger_id,event,context,rule_name,node_id}>",
