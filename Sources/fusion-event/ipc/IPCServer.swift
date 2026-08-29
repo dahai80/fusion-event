@@ -185,10 +185,13 @@ actor IPCServer {
         for await event in stream {
             let closed = await isConnClosed(fd: fdLocal)
             guard closed == false else { break }
-            let note = RPCNotification(method: "event.notification", params: AnyCodable([
-                "event": eventDict(event),
-                "source": event.sourceType.rawValue
-            ] as [String: Any]))
+            let note = RPCNotification(
+                method: "event.notification",
+                params: AnyCodable(
+                    [
+                        "event": eventDict(event),
+                        "source": event.sourceType.rawValue
+                    ] as [String: Any]))
             let data = RPCCodec.line(RPCCodec.encode(note))
             let ok = await Self.writeAll(fd: fd, data: data)
             if !ok { break }

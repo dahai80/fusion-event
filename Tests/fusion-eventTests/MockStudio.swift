@@ -78,7 +78,8 @@ final class MockStudio: @unchecked Sendable {
 
     private nonisolated func extractId(_ data: Data) -> String {
         guard let s = String(data: data, encoding: .utf8),
-              let r = s.range(of: "\"id\":") else { return "1" }
+            let r = s.range(of: "\"id\":")
+        else { return "1" }
         let rest = s[r.upperBound...]
         let num = rest.prefix { $0.isNumber }
         if !num.isEmpty { return String(num) }

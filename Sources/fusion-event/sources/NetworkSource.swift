@@ -45,15 +45,16 @@ public actor NetworkSource: EventSource {
         lastPath = sig
         lastEmitMs = now
         await registry.tickCount(.networkStatusChanged)
-        await bus?.publish(RawEvent(
-            sourceType: .networkStatusChanged,
-            targetPath: nil,
-            timestamp: now,
-            payload: [
-                "status": path.status == .satisfied ? "satisfied" : "unsatisfied",
-                "interfaces": path.availableInterfaces.map { $0.name }.joined(separator: ",")
-            ],
-            rawFlags: 0
-        ))
+        await bus?.publish(
+            RawEvent(
+                sourceType: .networkStatusChanged,
+                targetPath: nil,
+                timestamp: now,
+                payload: [
+                    "status": path.status == .satisfied ? "satisfied" : "unsatisfied",
+                    "interfaces": path.availableInterfaces.map { $0.name }.joined(separator: ",")
+                ],
+                rawFlags: 0
+            ))
     }
 }

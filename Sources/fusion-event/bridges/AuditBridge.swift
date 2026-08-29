@@ -40,7 +40,8 @@ public actor AuditBridge {
                 return decideDegrade(signal: signal, reason: "guard error \(err.code)")
             }
             guard let result = resp.result?.value as? [String: Any],
-                  let decisionStr = result["decision"] as? String else {
+                let decisionStr = result["decision"] as? String
+            else {
                 return decideDegrade(signal: signal, reason: "guard malformed response")
             }
             let riskLevel = result["risk_level"] as? Int ?? 0

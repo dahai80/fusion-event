@@ -4,7 +4,7 @@ This file gives guidance to Claude Code (claude.ai/code) when working with code 
 
 ## Status
 
-**`0.1.0-rc.4`** — implemented and released. macOS-native reactive event daemon, Swift 6 strict concurrency (all `actor`-isolated), standalone Swift Package (was extracted from the Fusion monorepo). 71 unit tests passing, 4 integration chains E2E-verified. Repo is public (Apache 2.0).
+**`0.1.0-rc.5`** — implemented and released. macOS-native reactive event daemon, Swift 6 strict concurrency (all `actor`-isolated), standalone Swift Package (was extracted from the Fusion monorepo). 71 unit tests passing, 4 integration chains E2E-verified. Repo is public (Apache 2.0).
 
 ## What fusion-event Is
 

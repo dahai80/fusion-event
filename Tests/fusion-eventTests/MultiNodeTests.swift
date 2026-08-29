@@ -54,7 +54,9 @@ final class MultiNodeTests: XCTestCase {
     }
 
     private func makeRule(name: String = "mn-rule", type: SystemEventType = .fileModified, pattern: String? = "/src/**/*.swift", debounceMs: Int = 0) -> EventRule {
-        EventRule(ruleName: name, eventType: type, pathPattern: pattern, debounceMs: debounceMs, throttleMs: 0, targetAgent: "fusion-code", targetGraphId: nil, enabled: true, maxRetries: 2, requireGuard: false)
+        EventRule(
+            ruleName: name, eventType: type, pathPattern: pattern, debounceMs: debounceMs, throttleMs: 0, targetAgent: "fusion-code", targetGraphId: nil, enabled: true, maxRetries: 2,
+            requireGuard: false)
     }
 
     func testNodeIdPropagatesThroughTriggerChain() async {
@@ -102,13 +104,14 @@ final class MultiNodeTests: XCTestCase {
         _ = await engine.addRule(makeRule(pattern: "/src/**/*.swift", debounceMs: 0))
         let n = 2000
         for i in 0..<n {
-            await bus.publish(RawEvent(
-                sourceType: .fileModified,
-                targetPath: "/src/f\(i)/a.swift",
-                timestamp: UInt64(i),
-                payload: [:],
-                rawFlags: 0
-            ))
+            await bus.publish(
+                RawEvent(
+                    sourceType: .fileModified,
+                    targetPath: "/src/f\(i)/a.swift",
+                    timestamp: UInt64(i),
+                    payload: [:],
+                    rawFlags: 0
+                ))
         }
         await bus.drainIngest()
         await engine.flush()
@@ -126,13 +129,14 @@ final class MultiNodeTests: XCTestCase {
         _ = await engine.addRule(makeRule(pattern: "/src/**/*.swift", debounceMs: 0))
         let n = 2000
         for _ in 0..<n {
-            await bus.publish(RawEvent(
-                sourceType: .fileModified,
-                targetPath: "/src/a.swift",
-                timestamp: 1000,
-                payload: [:],
-                rawFlags: 0
-            ))
+            await bus.publish(
+                RawEvent(
+                    sourceType: .fileModified,
+                    targetPath: "/src/a.swift",
+                    timestamp: 1000,
+                    payload: [:],
+                    rawFlags: 0
+                ))
         }
         await bus.drainIngest()
         await engine.flush()
@@ -148,13 +152,14 @@ final class MultiNodeTests: XCTestCase {
         _ = await engine.addRule(makeRule(pattern: "/src/**/*.swift", debounceMs: 0))
         let n = 500
         for i in 0..<n {
-            await bus.publish(RawEvent(
-                sourceType: .fileModified,
-                targetPath: "/src/f\(i)/a.swift",
-                timestamp: UInt64(i),
-                payload: [:],
-                rawFlags: 0
-            ))
+            await bus.publish(
+                RawEvent(
+                    sourceType: .fileModified,
+                    targetPath: "/src/f\(i)/a.swift",
+                    timestamp: UInt64(i),
+                    payload: [:],
+                    rawFlags: 0
+                ))
         }
         await bus.drainIngest()
         await engine.flush()

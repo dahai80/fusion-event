@@ -35,7 +35,9 @@ final class DispatcherTests: XCTestCase {
     }
 
     private func makeSignal(requireGuard: Bool = false) -> TriggerSignal {
-        let rule = EventRule(ruleName: "r1", eventType: .fileModified, pathPattern: "/x/*", debounceMs: 200, throttleMs: 0, targetAgent: "fusion-code", targetGraphId: nil, enabled: true, maxRetries: 2, requireGuard: requireGuard)
+        let rule = EventRule(
+            ruleName: "r1", eventType: .fileModified, pathPattern: "/x/*", debounceMs: 200, throttleMs: 0, targetAgent: "fusion-code", targetGraphId: nil, enabled: true, maxRetries: 2,
+            requireGuard: requireGuard)
         let raw = RawEvent(sourceType: .fileModified, targetPath: "/x/a.swift", timestamp: 1000, payload: [:], rawFlags: 0)
         return Normalizer.normalize(event: raw, rule: rule, nodeId: "n1")
     }

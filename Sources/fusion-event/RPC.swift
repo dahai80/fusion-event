@@ -31,9 +31,13 @@ enum RPCId: Codable, Equatable, Hashable, Sendable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
-        if let v = try? c.decode(Int.self) { self = .int(v) }
-        else if let v = try? c.decode(String.self) { self = .string(v) }
-        else { throw DecodingError.typeMismatch(RPCId.self, .init(codingPath: decoder.codingPath, debugDescription: "id must be int or string")) }
+        if let v = try? c.decode(Int.self) {
+            self = .int(v)
+        } else if let v = try? c.decode(String.self) {
+            self = .string(v)
+        } else {
+            throw DecodingError.typeMismatch(RPCId.self, .init(codingPath: decoder.codingPath, debugDescription: "id must be int or string"))
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -87,15 +91,23 @@ public struct AnyCodable: Codable, @unchecked Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
-        if c.decodeNil() { self.value = NSNull() }
-        else if let v = try? c.decode(Bool.self) { self.value = v }
-        else if let v = try? c.decode(Int.self) { self.value = v }
-        else if let v = try? c.decode(Double.self) { self.value = v }
-        else if let v = try? c.decode(String.self) { self.value = v }
-        else if let v = try? c.decode([AnyCodable].self) { self.value = v.map { $0.value } }
-        else if let v = try? c.decode([String: AnyCodable].self) {
+        if c.decodeNil() {
+            self.value = NSNull()
+        } else if let v = try? c.decode(Bool.self) {
+            self.value = v
+        } else if let v = try? c.decode(Int.self) {
+            self.value = v
+        } else if let v = try? c.decode(Double.self) {
+            self.value = v
+        } else if let v = try? c.decode(String.self) {
+            self.value = v
+        } else if let v = try? c.decode([AnyCodable].self) {
+            self.value = v.map { $0.value }
+        } else if let v = try? c.decode([String: AnyCodable].self) {
             self.value = v.mapValues { $0.value }
-        } else { self.value = NSNull() }
+        } else {
+            self.value = NSNull()
+        }
     }
 
     public func encode(to encoder: Encoder) throws {

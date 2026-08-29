@@ -60,8 +60,7 @@ private final class GlobMatcher {
             } else if path[s] == "/" {
                 result = dfs(p: p + 1, s: s)
             } else {
-                if dfs(p: p + 1, s: s) { result = true }
-                else { result = dfs(p: p, s: s + 1) }
+                if dfs(p: p + 1, s: s) { result = true } else { result = dfs(p: p, s: s + 1) }
             }
         } else if pattern[p] == "?" {
             if s < sLen && path[s] != "/" {

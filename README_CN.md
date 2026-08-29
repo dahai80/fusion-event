@@ -92,7 +92,7 @@ FSEvents / NSWorkspace / NWPathMonitor / Pasteboard
 
 ## 状态
 
-**`0.1.0-rc.4`** —— 第四个发布候选。四条集成链全部 E2E 验证(真实上游守护 / 进程内服务)。71 个单测通过,0 失败。
+**`0.1.0-rc.5`** —— 第五个发布候选。四条集成链全部 E2E 验证(真实上游守护 / 进程内服务)。71 个单测通过,0 失败。
 
 已知限制:
 - **EndpointSecurity** 特权源默认禁用 —— 需 Apple `endpoint-security.client` entitlement(审批中)。`NSWorkspace` 作为降级提供较低保真度的进程事件。

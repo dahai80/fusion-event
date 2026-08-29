@@ -32,7 +32,9 @@ final class RuleEngineTests: XCTestCase {
     }
 
     private func makeRule(name: String = "r1", type: SystemEventType = .fileModified, pattern: String? = "/src/*.swift", debounceMs: Int = 0, throttleMs: Int = 0, enabled: Bool = true) -> EventRule {
-        EventRule(ruleName: name, eventType: type, pathPattern: pattern, debounceMs: debounceMs, throttleMs: throttleMs, targetAgent: "fusion-code", targetGraphId: nil, enabled: enabled, maxRetries: 2, requireGuard: false)
+        EventRule(
+            ruleName: name, eventType: type, pathPattern: pattern, debounceMs: debounceMs, throttleMs: throttleMs, targetAgent: "fusion-code", targetGraphId: nil, enabled: enabled, maxRetries: 2,
+            requireGuard: false)
     }
 
     func testAddRemoveRule() async {
@@ -136,8 +138,10 @@ final class RuleEngineTests: XCTestCase {
         await engine1.setSink(sink1)
         await engine1.process(RawEvent(sourceType: .processTerminated, targetPath: "/usr/bin/ls", timestamp: nowMs, payload: [:], rawFlags: 0))
         await engine1.flush()
-        await eventLog.recordTrigger(triggerId: "t1", taskId: nil, idempotencyKey: "k1",
-            event: SystemEvent(eventId: "e1", type: .processTerminated, targetPath: "/usr/bin/ls",
+        await eventLog.recordTrigger(
+            triggerId: "t1", taskId: nil, idempotencyKey: "k1",
+            event: SystemEvent(
+                eventId: "e1", type: .processTerminated, targetPath: "/usr/bin/ls",
                 timestamp: nowMs, payload: [:], nodeId: "n1"),
             matchedRules: ["rb"])
         XCTAssertEqual(sink1.value, 1, "first event must fire")

@@ -67,17 +67,19 @@ public actor MetricsCollector {
         return [
             "uptime_ms": AnyCodable(now - startedAt),
             "source_events": AnyCodable(sourceEventCount),
-            "triggers": AnyCodable([
-                "submitted": triggerSubmitted,
-                "blocked": triggerBlocked,
-                "failed": triggerFailed,
-                "dropped": triggerDropped,
-                "retried": triggerRetried
-            ] as [String: UInt64]),
-            "drops": AnyCodable([
-                "ingest": ingestDropped,
-                "dispatch": dispatchDropped
-            ] as [String: UInt64]),
+            "triggers": AnyCodable(
+                [
+                    "submitted": triggerSubmitted,
+                    "blocked": triggerBlocked,
+                    "failed": triggerFailed,
+                    "dropped": triggerDropped,
+                    "retried": triggerRetried
+                ] as [String: UInt64]),
+            "drops": AnyCodable(
+                [
+                    "ingest": ingestDropped,
+                    "dispatch": dispatchDropped
+                ] as [String: UInt64]),
             "outbox_backlog": AnyCodable(outboxBacklog),
             "backpressure_total_ms": AnyCodable(pressureTotalMs),
             "backpressure_active_ms": AnyCodable(pressureActiveMs),
