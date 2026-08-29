@@ -99,8 +99,9 @@ struct FusionEventConfig: Codable, Sendable {
         let fm = FileManager.default
         try? fm.createDirectory(atPath: dataDir, withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: URL(fileURLWithPath: idPath)),
-           let s = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !s.isEmpty {
+            let s = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !s.isEmpty
+        {
             return s
         }
         let newId = "node-" + UUID().uuidString.prefix(8)

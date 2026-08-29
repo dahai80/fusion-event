@@ -31,28 +31,28 @@ actor RuleStore {
         sqlite3_exec(handle, "PRAGMA journal_mode=WAL;", nil, nil, nil)
         sqlite3_exec(handle, "PRAGMA synchronous=FULL;", nil, nil, nil)
         let ddl = """
-        CREATE TABLE IF NOT EXISTS rules (
-            rule_name      TEXT PRIMARY KEY,
-            event_type     TEXT NOT NULL,
-            path_pattern   TEXT,
-            debounce_ms    INTEGER DEFAULT 0,
-            throttle_ms    INTEGER DEFAULT 0,
-            throttle_max_per_window INTEGER DEFAULT 1,
-            target_agent   TEXT NOT NULL,
-            target_graph_id TEXT DEFAULT '',
-            enabled        INTEGER DEFAULT 1,
-            max_retries    INTEGER DEFAULT 2,
-            require_guard  INTEGER DEFAULT 0,
-            created_at     REAL,
-            updated_at     REAL
-        );
-        CREATE INDEX IF NOT EXISTS idx_rules_type ON rules(event_type);
-        CREATE TABLE IF NOT EXISTS debounce_state (
-            rule_name      TEXT PRIMARY KEY,
-            last_fire_ts   INTEGER NOT NULL,
-            node_id        TEXT
-        );
-        """
+            CREATE TABLE IF NOT EXISTS rules (
+                rule_name      TEXT PRIMARY KEY,
+                event_type     TEXT NOT NULL,
+                path_pattern   TEXT,
+                debounce_ms    INTEGER DEFAULT 0,
+                throttle_ms    INTEGER DEFAULT 0,
+                throttle_max_per_window INTEGER DEFAULT 1,
+                target_agent   TEXT NOT NULL,
+                target_graph_id TEXT DEFAULT '',
+                enabled        INTEGER DEFAULT 1,
+                max_retries    INTEGER DEFAULT 2,
+                require_guard  INTEGER DEFAULT 0,
+                created_at     REAL,
+                updated_at     REAL
+            );
+            CREATE INDEX IF NOT EXISTS idx_rules_type ON rules(event_type);
+            CREATE TABLE IF NOT EXISTS debounce_state (
+                rule_name      TEXT PRIMARY KEY,
+                last_fire_ts   INTEGER NOT NULL,
+                node_id        TEXT
+            );
+            """
         if sqlite3_exec(handle, ddl, nil, nil, nil) != SQLITE_OK {
             let msg = String(cString: sqlite3_errmsg(handle))
             FusionLog.persist.error("rulestore ddl fail \(msg, privacy: .public)")
@@ -152,13 +152,14 @@ actor RuleStore {
                 let mr = sqlite3_column_int(stmt, 9)
                 let rg = sqlite3_column_int(stmt, 10) != 0
                 guard let et = SystemEventType(rawValue: type) else { continue }
-                rules.append(EventRule(
-                    ruleName: name, eventType: et, pathPattern: path,
-                    debounceMs: Int(deb), throttleMs: Int(thr),
-                    throttleMaxPerWindow: Int(thrMax),
-                    targetAgent: agent, targetGraphId: graph, enabled: en,
-                    maxRetries: Int(mr), requireGuard: rg
-                ))
+                rules.append(
+                    EventRule(
+                        ruleName: name, eventType: et, pathPattern: path,
+                        debounceMs: Int(deb), throttleMs: Int(thr),
+                        throttleMaxPerWindow: Int(thrMax),
+                        targetAgent: agent, targetGraphId: graph, enabled: en,
+                        maxRetries: Int(mr), requireGuard: rg
+                    ))
             }
             sqlite3_finalize(stmt)
         }
@@ -170,14 +171,14 @@ actor RuleStore {
         let now = Date().timeIntervalSince1970
         var stmt: OpaquePointer?
         let sql = """
-        INSERT INTO rules(rule_name,event_type,path_pattern,debounce_ms,throttle_ms,throttle_max_per_window,target_agent,target_graph_id,enabled,max_retries,require_guard,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(rule_name) DO UPDATE SET
-            event_type=excluded.event_type,path_pattern=excluded.path_pattern,
-            debounce_ms=excluded.debounce_ms,throttle_ms=excluded.throttle_ms,throttle_max_per_window=excluded.throttle_max_per_window,
-            target_agent=excluded.target_agent,target_graph_id=excluded.target_graph_id,
-            enabled=excluded.enabled,max_retries=excluded.max_retries,require_guard=excluded.require_guard,updated_at=excluded.updated_at;
-        """
+            INSERT INTO rules(rule_name,event_type,path_pattern,debounce_ms,throttle_ms,throttle_max_per_window,target_agent,target_graph_id,enabled,max_retries,require_guard,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(rule_name) DO UPDATE SET
+                event_type=excluded.event_type,path_pattern=excluded.path_pattern,
+                debounce_ms=excluded.debounce_ms,throttle_ms=excluded.throttle_ms,throttle_max_per_window=excluded.throttle_max_per_window,
+                target_agent=excluded.target_agent,target_graph_id=excluded.target_graph_id,
+                enabled=excluded.enabled,max_retries=excluded.max_retries,require_guard=excluded.require_guard,updated_at=excluded.updated_at;
+            """
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             FusionLog.persist.error("rulestore upsert prepare fail")
             return false

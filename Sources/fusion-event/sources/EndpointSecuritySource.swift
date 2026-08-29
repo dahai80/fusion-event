@@ -146,16 +146,17 @@ public actor EndpointSecuritySource: EventSource {
     private func publish(_ snap: ESSnap) async {
         guard enabled else { return }
         await registry.tickCount(.processTerminated)
-        await bus?.publish(RawEvent(
-            sourceType: .processTerminated,
-            targetPath: snap.execPath,
-            timestamp: snap.timestamp,
-            payload: [
-                "pid": String(snap.pid),
-                "event": snap.action,
-                "source": "endpoint-security"
-            ],
-            rawFlags: 0
-        ))
+        await bus?.publish(
+            RawEvent(
+                sourceType: .processTerminated,
+                targetPath: snap.execPath,
+                timestamp: snap.timestamp,
+                payload: [
+                    "pid": String(snap.pid),
+                    "event": snap.action,
+                    "source": "endpoint-security"
+                ],
+                rawFlags: 0
+            ))
     }
 }

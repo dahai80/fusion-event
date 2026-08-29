@@ -67,22 +67,24 @@ actor RPCMethods {
         let stats = await dispatcher.stats()
         let dropped = await ruleEngine.dispatchDroppedCount()
         let src = await registry.health()
-        return ok(req, [
-            "ok": true,
-            "version": version,
-            "schema_version": schemaVersion,
-            "uptime_sec": now - startedAt,
-            "sources": src,
-            "triggers": [
-                "submitted": stats["submitted"] ?? 0,
-                "blocked": stats["blocked"] ?? 0,
-                "failed": stats["failed"] ?? 0,
-                "dropped": stats["dropped"] ?? 0,
-                "dispatch_dropped": dropped
-            ] as [String: UInt64],
-            "sock": config.sockPath,
-            "node_id": config.nodeId
-        ] as [String: Any])
+        return ok(
+            req,
+            [
+                "ok": true,
+                "version": version,
+                "schema_version": schemaVersion,
+                "uptime_sec": now - startedAt,
+                "sources": src,
+                "triggers": [
+                    "submitted": stats["submitted"] ?? 0,
+                    "blocked": stats["blocked"] ?? 0,
+                    "failed": stats["failed"] ?? 0,
+                    "dropped": stats["dropped"] ?? 0,
+                    "dispatch_dropped": dropped
+                ] as [String: UInt64],
+                "sock": config.sockPath,
+                "node_id": config.nodeId
+            ] as [String: Any])
     }
 
     private func ruleAdd(req: RPCRequest) async -> RPCResponse {
@@ -90,11 +92,12 @@ actor RPCMethods {
             return err(req, code: RPCErrorCode.ruleValidation.rawValue, message: "missing params")
         }
         guard let name = value["rule_name"] as? String,
-              name.count > 0, name.count <= 256,
-              let typeStr = value["event_type"] as? String,
-              let type = SystemEventType(rawValue: typeStr),
-              let agent = value["target_agent"] as? String,
-              agent.count > 0, agent.count <= 256 else {
+            name.count > 0, name.count <= 256,
+            let typeStr = value["event_type"] as? String,
+            let type = SystemEventType(rawValue: typeStr),
+            let agent = value["target_agent"] as? String,
+            agent.count > 0, agent.count <= 256
+        else {
             return err(req, code: RPCErrorCode.ruleValidation.rawValue, message: "invalid rule fields")
         }
         let pathPattern = value["path_pattern"] as? String
@@ -129,7 +132,8 @@ actor RPCMethods {
 
     private func ruleRemove(req: RPCRequest) async -> RPCResponse {
         guard let value = req.params?.value as? [String: Any],
-              let name = value["rule_name"] as? String else {
+            let name = value["rule_name"] as? String
+        else {
             return err(req, code: RPCErrorCode.ruleValidation.rawValue, message: "missing rule_name")
         }
         let removed = await ruleEngine.removeRule(name)

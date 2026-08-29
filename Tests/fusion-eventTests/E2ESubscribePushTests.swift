@@ -45,10 +45,11 @@ final class E2ESubscribePushTests: XCTestCase {
         let pathLen = min(pathC.count, MemoryLayout.size(ofValue: addr.sun_path))
         _ = pathC.withUnsafeBufferPointer { src in
             withUnsafeMutableBytes(of: &addr.sun_path) { dst in
-                dst.copyMemory(from: UnsafeRawBufferPointer(
-                    start: UnsafeRawPointer(src.baseAddress!),
-                    count: pathLen
-                ))
+                dst.copyMemory(
+                    from: UnsafeRawBufferPointer(
+                        start: UnsafeRawPointer(src.baseAddress!),
+                        count: pathLen
+                    ))
             }
         }
         let rc = withUnsafePointer(to: &addr) {
@@ -85,7 +86,8 @@ final class E2ESubscribePushTests: XCTestCase {
                 let line = lineBuf.subdata(in: 0..<nl)
                 lineBuf.removeSubrange(0...nl)
                 guard !line.isEmpty,
-                      let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
+                    let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any]
+                else { continue }
                 out.append(json)
                 if out.count >= maxLines { return out }
             }
@@ -155,10 +157,11 @@ final class E2ESubscribePushTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 200_000_000)
         let base = UInt64(getpid())
         for i in 0..<3 {
-            await bus.publish(RawEvent(
-                sourceType: .fileModified, targetPath: "/e2e/push/\(i).swift",
-                timestamp: base + UInt64(i), payload: ["i": "\(i)"], rawFlags: 0
-            ))
+            await bus.publish(
+                RawEvent(
+                    sourceType: .fileModified, targetPath: "/e2e/push/\(i).swift",
+                    timestamp: base + UInt64(i), payload: ["i": "\(i)"], rawFlags: 0
+                ))
         }
 
         // ACK first, then notifications for the 3 published events.

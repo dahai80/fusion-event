@@ -61,7 +61,9 @@ final class E2EStudioTests: XCTestCase {
         let audit = AuditBridge(sockPath: tmpDir + "g.sock", timeoutSec: 1)
         let ctx = ContextBridge(sockPath: tmpDir + "m.sock", timeoutSec: 1, ttlSec: 60)
         await dispatcher.setBridges(audit: audit, context: ctx)
-        let rule = EventRule(ruleName: "e2e-rule", eventType: .fileModified, pathPattern: "/src/**/*.swift", debounceMs: 0, throttleMs: 0, targetAgent: "fusion-code", targetGraphId: nil, enabled: true, maxRetries: 0, requireGuard: false)
+        let rule = EventRule(
+            ruleName: "e2e-rule", eventType: .fileModified, pathPattern: "/src/**/*.swift", debounceMs: 0, throttleMs: 0, targetAgent: "fusion-code", targetGraphId: nil, enabled: true, maxRetries: 0,
+            requireGuard: false)
         let ok = await engine.addRule(rule)
         XCTAssertTrue(ok)
         await engine.setSink(dispatcher)

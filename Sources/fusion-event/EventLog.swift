@@ -151,8 +151,9 @@ actor EventLog {
             }
             if !stop, !buffer.isEmpty {
                 if let entry = try? dec.decode(LoggedEvent.self, from: buffer) {
-                    if entry.event.timestamp < cutoffMs { stop = true }
-                    else if !entry.matchedRules.isEmpty {
+                    if entry.event.timestamp < cutoffMs {
+                        stop = true
+                    } else if !entry.matchedRules.isEmpty {
                         for ruleName in entry.matchedRules {
                             let ts = entry.event.timestamp
                             if window[ruleName, default: 0] < ts { window[ruleName] = ts }

@@ -173,7 +173,8 @@ public actor Dispatcher: TriggerSink {
             "rule_name": signal.rule.ruleName,
             "node_id": signal.nodeId
         ]
-        let inputJSON = (try? JSONSerialization.data(withJSONObject: input, options: [.sortedKeys]))
+        let inputJSON =
+            (try? JSONSerialization.data(withJSONObject: input, options: [.sortedKeys]))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         let params: [String: Any] = [
             "title": "event:\(signal.rule.ruleName)",
@@ -454,7 +455,8 @@ final class DispatcherOutbox: @unchecked Sendable {
         for f in files where f.hasSuffix(".json") {
             let p = "\(queueDir)/\(f)"
             if let data = try? Data(contentsOf: URL(fileURLWithPath: p)),
-               let sig = try? dec.decode(TriggerSignal.self, from: data) {
+                let sig = try? dec.decode(TriggerSignal.self, from: data)
+            {
                 out.append(sig)
             }
         }

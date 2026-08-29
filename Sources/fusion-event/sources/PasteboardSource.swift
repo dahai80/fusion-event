@@ -41,12 +41,13 @@ public actor PasteboardSource: EventSource {
         lastCount = count
         let now = UInt64(Date().timeIntervalSince1970 * 1000)
         await registry.tickCount(.clipboardChanged)
-        await bus?.publish(RawEvent(
-            sourceType: .clipboardChanged,
-            targetPath: nil,
-            timestamp: now,
-            payload: ["change": "1"],
-            rawFlags: 0
-        ))
+        await bus?.publish(
+            RawEvent(
+                sourceType: .clipboardChanged,
+                targetPath: nil,
+                timestamp: now,
+                payload: ["change": "1"],
+                rawFlags: 0
+            ))
     }
 }

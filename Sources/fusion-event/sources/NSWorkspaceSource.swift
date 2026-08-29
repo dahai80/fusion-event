@@ -49,7 +49,8 @@ public actor NSWorkspaceSource: EventSource {
             }
         }
         mountObserver = nc.addObserver(forName: NSNotification.Name("NSWorkspaceDidMountNotification"), object: nil, queue: nil) { [weak self] note in
-            let volumePath = (note.userInfo?["NSDevicePath"] as? String)
+            let volumePath =
+                (note.userInfo?["NSDevicePath"] as? String)
                 ?? (note.userInfo?["NSVolumePath"] as? String)
             let now = UInt64(Date().timeIntervalSince1970 * 1000)
             let ev = RawEvent(
@@ -89,18 +90,19 @@ public actor NSWorkspaceSource: EventSource {
     private func publishProcess(_ snap: ProcessSnap) async {
         let et: SystemEventType = snap.isLaunch ? .processLaunched : .processTerminated
         await registry.tickCount(et)
-        await bus?.publish(RawEvent(
-            sourceType: et,
-            targetPath: snap.execPath,
-            timestamp: snap.timestamp,
-            payload: [
-                "pid": String(snap.pid),
-                "processName": snap.name,
-                "bundleId": snap.bundle,
-                "event": snap.isLaunch ? "launch" : "terminate"
-            ],
-            rawFlags: 0
-        ))
+        await bus?.publish(
+            RawEvent(
+                sourceType: et,
+                targetPath: snap.execPath,
+                timestamp: snap.timestamp,
+                payload: [
+                    "pid": String(snap.pid),
+                    "processName": snap.name,
+                    "bundleId": snap.bundle,
+                    "event": snap.isLaunch ? "launch" : "terminate"
+                ],
+                rawFlags: 0
+            ))
     }
 
     public func stop() async {

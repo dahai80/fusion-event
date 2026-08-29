@@ -79,7 +79,8 @@ private final class MockGuard: @unchecked Sendable {
 
     private nonisolated func extractId(_ data: Data) -> String {
         guard let s = String(data: data, encoding: .utf8),
-              let r = s.range(of: "\"id\":") else { return "1" }
+            let r = s.range(of: "\"id\":")
+        else { return "1" }
         let rest = s[r.upperBound...]
         let num = rest.prefix { $0.isNumber }
         if !num.isEmpty { return String(num) }
@@ -116,7 +117,9 @@ final class AuditBridgeTests: XCTestCase {
     }
 
     private func makeSignal(requireGuard: Bool = false) -> TriggerSignal {
-        let rule = EventRule(ruleName: "r1", eventType: .fileModified, pathPattern: "/x/*", debounceMs: 0, throttleMs: 0, targetAgent: "fusion-code", targetGraphId: nil, enabled: true, maxRetries: 0, requireGuard: requireGuard)
+        let rule = EventRule(
+            ruleName: "r1", eventType: .fileModified, pathPattern: "/x/*", debounceMs: 0, throttleMs: 0, targetAgent: "fusion-code", targetGraphId: nil, enabled: true, maxRetries: 0,
+            requireGuard: requireGuard)
         let raw = RawEvent(sourceType: .fileModified, targetPath: "/x/a.swift", timestamp: 1000, payload: [:], rawFlags: 0)
         return Normalizer.normalize(event: raw, rule: rule, nodeId: "n1")
     }

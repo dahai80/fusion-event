@@ -176,8 +176,7 @@ public actor RuleEngine {
 
     public func match(_ event: RawEvent) -> [EventRule] {
         self.rules.filter { rule in
-            rule.eventType == event.sourceType &&
-            Glob.match(pattern: rule.pathPattern, path: event.targetPath ?? "")
+            rule.eventType == event.sourceType && Glob.match(pattern: rule.pathPattern, path: event.targetPath ?? "")
         }
     }
 

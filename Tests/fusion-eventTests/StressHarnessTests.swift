@@ -80,7 +80,9 @@ final class StressHarnessTests: XCTestCase {
     }
 
     private func makeRule(name: String = "stress-rule", pattern: String = "/src/**/*.swift", debounceMs: Int = 0) -> EventRule {
-        EventRule(ruleName: name, eventType: .fileModified, pathPattern: pattern, debounceMs: debounceMs, throttleMs: 0, targetAgent: "fusion-code", targetGraphId: nil, enabled: true, maxRetries: 1, requireGuard: false)
+        EventRule(
+            ruleName: name, eventType: .fileModified, pathPattern: pattern, debounceMs: debounceMs, throttleMs: 0, targetAgent: "fusion-code", targetGraphId: nil, enabled: true, maxRetries: 1,
+            requireGuard: false)
     }
 
     // 24h-capable long-run: N distinct events, verify no crash + no leak growth.
