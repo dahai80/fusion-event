@@ -95,7 +95,7 @@ See [docs/integration.md](docs/integration.md) for the frozen RPC contracts and 
 
 ## Status
 
-**`0.1.0-rc.4`** — fourth release candidate. All four integration chains E2E-verified against live upstream daemons / in-process server. 71 unit tests passing, 0 failures.
+**`0.1.0-rc.5`** — fifth release candidate. All four integration chains E2E-verified against live upstream daemons / in-process server. 71 unit tests passing, 0 failures.
 
 Known limitations:
 - **EndpointSecurity** privileged source disabled by default — needs Apple `endpoint-security.client` entitlement (pending). `NSWorkspace` provides lower-fidelity process events as degrade.

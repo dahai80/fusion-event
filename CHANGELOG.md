@@ -2,10 +2,26 @@
 
 ## [Unreleased]
 
+## [0.1.0-rc.5] — 2026-08-29
+
+Patch release. Public-release documentation (was unreleased on `main` since rc.4) plus a full `swift-format` cleanup that takes the codebase from 218 advisory lint warnings to 0.
+
 ### Changed
 - **Public release docs**: repository transitioned to public visibility. Added bilingual README (`README.md` English default + `README_CN.md` Chinese, cross-linked). Rewrote `README.md` from an internal milestone ledger into a public-facing quick-start + architecture + integration overview (detailed internals moved to `docs/`). Refreshed stale `CLAUDE.md` (was greenfield-era, contradicted rc.4) to the current implemented state with standalone (non-monorepo) context.
 - **Added docs**: `docs/USAGE.md` (customer install/run/configure/troubleshoot), `docs/ARCHITECTURE.md` (system design), `docs/DEVELOPMENT.md` (build/test/lint/extend/contribute).
 - **PII scrub**: replaced `/Users/dahai/` example paths with `/Users/you/` in tracked docs/tests (real macOS username) ahead of the public flip. Working-tree only — git history retains the originals (username already in the GitHub handle).
+
+### Fixed
+- **swift-format advisory warnings → 0**: rc.1–rc.4 carried 213–218 `swift-format lint` advisory warnings (built-in `Indentation` / `AddLines` / `RemoveLine` suggestions on pre-existing codebase style; `lint` exits 0 so CI passed, but the noise obscured real findings). Ran `swift-format format -i -r Sources Tests` against the existing `.swift-format` config (`respectsExistingLineBreaks: true`, so line wrapping was preserved — only indentation and blank-line spacing changed, 25 files, no semantic change). `swift-format lint -r Sources Tests --configuration .swift-format` now reports 0 warnings.
+
+### Verification
+- `swift build` (debug + release): green
+- `swift test`: 71 passing, 10 skipped, 0 failures
+- `swift-format lint -r Sources Tests --configuration .swift-format`: 0 warnings, exit 0
+
+### Note on external blockers (not fixable in this repo)
+- **CI runs red on GitHub**: all recent `CI` workflow runs fail with *"The job was not started because recent account payments have failed or your spending limit needs to be increased."* This is an account-level billing block, not a code or workflow defect — local build/test/lint are green. Resolve in GitHub Settings → Billing & plans.
+- **Issue #1 (EndpointSecurity L2/L3)**: still blocked on the Apple `endpoint-security.client` entitlement (application pending, typically weeks). No code path forward until granted.
 
 ## [0.1.0-rc.4] — 2026-08-28
 
