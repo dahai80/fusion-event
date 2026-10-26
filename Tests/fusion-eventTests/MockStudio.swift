@@ -41,8 +41,9 @@ final class MockStudio: @unchecked Sendable {
             while !Task.isCancelled {
                 let cfd = Darwin.accept(lfd, nil, nil)
                 if cfd < 0 { break }
-                self?.connLock.withLock { $0.append(cfd) }
-                Task { self?.handleConn(fd: cfd) }
+                guard let self = self else { break }
+                self.connLock.withLock { $0.append(cfd) }
+                Task { self.handleConn(fd: cfd) }
             }
         }
     }
