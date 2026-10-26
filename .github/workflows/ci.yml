@@ -34,7 +34,7 @@ jobs:
         run: |
           output=$(swift test 2>&1)
           echo "$output"
-          echo "$output" | rg -c "Executed [0-9]+ tests, with 0 failures" || {
+          echo "$output" | grep -c "Executed [0-9]* tests, with 0 failures" || {
             echo "test verification failed"
             exit 1
           }
