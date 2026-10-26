@@ -8,6 +8,10 @@ import os
 // Covers release-readiness gaps O2: long-run memory drift, downstream-kill
 // outbox replay, disk-full degrade, concurrent IPC client load.
 
+// macOS 15 SDK imports mach_task_self_ as an unsynchronized global var;
+// newer SDKs do not. Suppress only at this one read site.
+private nonisolated(unsafe) let machTaskSelf = mach_task_self_
+
 private func stressEnabled() -> Bool {
     ProcessInfo.processInfo.environment["FUSION_EVENT_STRESS"] != nil
 }
@@ -228,7 +232,7 @@ final class StressHarnessTests: XCTestCase {
         var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info_data_t>.size / MemoryLayout<integer_t>.size)
         let kresult = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+                task_info(machTaskSelf, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
             }
         }
         guard kresult == KERN_SUCCESS else { return 0 }

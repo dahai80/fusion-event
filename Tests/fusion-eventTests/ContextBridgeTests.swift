@@ -44,8 +44,9 @@ private final class MockMemory: @unchecked Sendable {
             while !Task.isCancelled {
                 let cfd = Darwin.accept(lfd, nil, nil)
                 if cfd < 0 { break }
-                self?.connLock.withLock { $0.append(cfd) }
-                Task { self?.handleConn(fd: cfd, resp: r) }
+                guard let self = self else { break }
+                self.connLock.withLock { $0.append(cfd) }
+                Task { self.handleConn(fd: cfd, resp: r) }
             }
         }
     }
