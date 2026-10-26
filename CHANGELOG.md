@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.1.0-rc.6] — 2026-10-26
+
+Patch release. Fixes the CI pipeline, which had been red on every run since 2026-08-29 (issue #13).
+
+### Fixed
+- **CI green again (issue #13)**: every run since 2026-08-29 failed at `swift build` with *"package 'fusion-event' is using Swift tools version 6.0.0 but the installed version is 5.10.0"*. The `macos-14` runner image ships Swift 5.10 / Xcode 15.3; this package requires the Swift 6 toolchain. Both jobs (`build-and-test`, `lint`) now run on `macos-15` (Xcode 16 / Swift 6) and the Xcode-select step points at `Xcode_16`. Root cause was the toolchain mismatch from issue #13's survey — the earlier rc.5 billing block had since been resolved at the account level, exposing the toolchain failure underneath.
+- **Tests compile under Swift 6.0 / macOS 15 SDK** (surfaced once CI could actually compile): three sites rejected by the runner's Swift 6.0 toolchain but accepted by newer local toolchains — `Task { self?.handleConn(...) }` in `AuditBridgeTests` / `ContextBridgeTests` (optional-chained method reference in a `Task` operation read as a strongly-transferred task-isolated value; now unwrapped with `guard let self` before spawning, closure calls the method directly) and `mach_task_self_` in `StressHarnessTests` (imported as an unsynchronized global var by the macOS 15 SDK; read is now funneled through a single `nonisolated(unsafe) let`).
+
+### Verification
+- `swift build` (debug): green
+- `swift test`: 71 passing, 10 skipped, 0 failures
+- CI on `main` (run for this release commit): green
+
 ## [0.1.0-rc.5] — 2026-08-29
 
 Patch release. Public-release documentation (was unreleased on `main` since rc.4) plus a full `swift-format` cleanup that takes the codebase from 218 advisory lint warnings to 0.
