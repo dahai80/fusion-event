@@ -39,6 +39,9 @@ jobs:
             exit 1
           }
 
+      - name: start.sh registry self-check tests
+        run: bash scripts/test-start-registry.sh
+
   lint:
     runs-on: macos-15
     steps:

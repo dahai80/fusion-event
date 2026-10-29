@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [0.1.0-rc.7] — 2026-10-30
+
+Patch release. Port-registry self-check in `start.sh` (issue #14, config governance Phase 3.3), plus three latent `start.sh` bugs the resulting E2E run surfaced — the ad-hoc `start` path had never worked on a stock macOS machine.
+
+### Added
+- **`start.sh` port-registry self-check (issue #14)**: `start` now verifies its registry status before launching. fusion-event is a UDS-only daemon — it owns no TCP port, has no `PORT` variable, and no `port-registry.yaml` entry (the registry is TCP-port-based; this issue's template assumed a port-bearing service). The register-then-start rule is therefore inverted to fit: a `port:` entry for `fusion-event` in the registry is a misregistration (the daemon must never listen on TCP) and now **refuses at start** instead of being caught late by `scripts/check-ports.py`. Semantics per the issue: missing registry file (`$FUSION_REGISTRY`, default `~/fusion/architecture/port-registry.yaml`) = warn + continue (standalone deploy); `FUSION_SKIP_REGISTRY_CHECK=1` bypasses the refusal. Extracted as `registry_selfcheck()` behind a source guard; 5-path bash test at `scripts/test-start-registry.sh` wired into CI.
+
+### Fixed
+- **`start.sh` ad-hoc start path broken on stock macOS** (found via issue #14 E2E): `setsid "$bin"` — `setsid` is util-linux, absent on stock macOS, so `start` always failed with `setsid: command not found` after building. Now `nohup` (same class of gap as the `flock` absence fixed in issue #8, rc.4).
+- **Stale lock FILE wedges every future `start`**: a plain file at `$DATA_DIR.lock` (left by a legacy or crashed run — one had sat on this machine since 2026-08-28) makes `mkdir` fail while the stale-pid recovery branch never triggers (no readable `pid` inside a file), so `start` aborted with "another start.sh instance holding lock" forever. Non-directory lock paths are now removed and reclaimed with a warning.
+- **Single-instance lock never actually released**: the `trap 'rmdir $lock_dir' EXIT` from issue #8 (rc.4) had two fatal flaws — the trap fires after `do_start` returns, where `local lock_dir` is out of scope (error under `set -u`), and `rmdir` on a directory containing the `pid` file always fails silently. Trap now removes the pid file first and references the global `$DATA_DIR.lock`. Verified by full start → doctor → stop cycle with lock-dir absence checked after exit.
+
+### Verification
+- `bash scripts/test-start-registry.sh`: 5/5 pass (missing registry / no entry / port entry refuses / bypass / entry without port)
+- Real registry (`~/fusion/architecture/port-registry.yaml`, no fusion-event entry): self-check passes, `start` proceeds
+- Full E2E: `start` → `doctor` (pass=4, `event.health` reachable) → `stop` → lock dir released
+- `swift test`: 71 passing, 10 skipped, 0 failures
+- CI on `main` (this release commit): green
+
 ## [0.1.0-rc.6] — 2026-10-26
 
 Patch release. Fixes the CI pipeline, which had been red on every run since 2026-08-29 (issue #13).

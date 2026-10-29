@@ -42,6 +42,8 @@ Two run modes — use one, not both:
 
 `stop` and `status` auto-detect a launchd-managed process. Single-instance locking is enforced (a `mkdir`-based lock — fails fast if another instance holds it).
 
+**Port-registry self-check** (`start` only, config governance Phase 3.3): fusion-event is UDS-only and owns no TCP port, so `start` refuses to launch if a `port:` entry for `fusion-event` ever appears in `port-registry.yaml` (`$FUSION_REGISTRY`, default `~/fusion/architecture/port-registry.yaml`) — that would be a misregistration caught late by `scripts/check-ports.py` otherwise. A missing registry file (standalone deploy) warns and continues; `FUSION_SKIP_REGISTRY_CHECK=1` bypasses the refusal.
+
 ## Configuration
 
 Config lives in `~/.fusion-event/config.json` (created on first run with defaults). Edit it while the daemon is stopped, or via `rule.*` RPCs at runtime.

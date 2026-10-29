@@ -34,11 +34,41 @@ rotate_log() {
     fi
 }
 
+# Config Phase 3.3: port-registry self-check (issue #14). fusion-event is a
+# UDS-only daemon — it owns no TCP port, so the register-then-start rule is
+# inverted here: a `port:` entry for this service in port-registry.yaml is a
+# misregistration and must fail at start instead of being caught later by
+# scripts/check-ports.py. Missing registry file = standalone deploy: warn and
+# continue. FUSION_SKIP_REGISTRY_CHECK=1 bypasses the refusal.
+registry_selfcheck() {
+    local service="fusion-event"
+    local registry="${FUSION_REGISTRY:-$HOME/fusion/architecture/port-registry.yaml}"
+    if [ ! -f "$registry" ]; then
+        echo "warn: port-registry.yaml not found at $registry — registry self-check skipped" >&2
+        return 0
+    fi
+    if grep -A3 "^  ${service}:" "$registry" 2>/dev/null | grep -q "port:"; then
+        if [ "${FUSION_SKIP_REGISTRY_CHECK:-}" != "1" ]; then
+            echo "${service} is UDS-only but has a port entry in $registry — refusing to start" >&2
+            return 1
+        fi
+        echo "warn: registry check bypassed (FUSION_SKIP_REGISTRY_CHECK=1)" >&2
+    fi
+    return 0
+}
+
 do_start() {
     # mkdir-based single-instance lock (POSIX atomic, no external binary).
     # macOS lacks util-linux flock, so a directory lock is the portable choice.
     # Stale-pid recovery: if the holder died without releasing, reclaim the lock.
     local lock_dir="$DATA_DIR.lock"
+    # Legacy/stale lock FILE at the lock path wedges every start: mkdir fails
+    # on it and the stale-pid recovery below never triggers (no pid readable
+    # from a plain file). Remove and reclaim (found via E2E, issue #14 run).
+    if [[ -e "$lock_dir" && ! -d "$lock_dir" ]]; then
+        echo "warn: stale lock file (not dir) at $lock_dir — removing" >&2
+        rm -f "$lock_dir"
+    fi
     if ! mkdir "$lock_dir" 2>/dev/null; then
         if [[ -f "$lock_dir/pid" ]] && ! kill -0 "$(cat "$lock_dir/pid" 2>/dev/null)" 2>/dev/null; then
             rm -rf "$lock_dir"
@@ -49,7 +79,12 @@ do_start() {
         fi
     fi
     echo "$$" > "$lock_dir/pid"
-    trap 'rmdir "$lock_dir" 2>/dev/null' EXIT
+    # Trap must reference the global path: the EXIT trap fires after do_start
+    # returns, where the local lock_dir is out of scope (set -u errors, lock
+    # never released). rmdir alone never worked — the pid file inside makes
+    # the dir non-empty; remove it first.
+    trap 'rm -f "$DATA_DIR.lock/pid"; rmdir "$DATA_DIR.lock" 2>/dev/null' EXIT
+    registry_selfcheck
     local bin
     bin="$(resolve_bin)"
     if [[ -z "$bin" ]]; then
@@ -67,7 +102,9 @@ do_start() {
         echo "already running pid=$(cat "$PID_FILE")"
         return 0
     fi
-    setsid "$bin" >> "$LOG_FILE" 2>&1 &
+    # nohup, not setsid — setsid is util-linux, absent on stock macOS (same
+    # class as the flock gap fixed in issue #8).
+    nohup "$bin" >> "$LOG_FILE" 2>&1 &
     local pid=$!
     echo "$pid" > "$PID_FILE"
     sleep 1
@@ -246,13 +283,17 @@ do_uninstall() {
     echo "uninstalled launchd agent ${PLIST_LABEL}"
 }
 
-case "$cmd" in
-    start) do_start ;;
-    stop) do_stop ;;
-    status) do_status ;;
-    log) do_log "$@" ;;
-    doctor) do_doctor ;;
-    install) do_install ;;
-    uninstall) do_uninstall ;;
-    *) echo "usage: $0 {start|stop|status|log [-f]|doctor|install|uninstall}"; exit 1 ;;
-esac
+# Guard: only dispatch when executed directly — allows tests to source this
+# script and call individual functions (scripts/test-start-registry.sh).
+if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then
+    case "$cmd" in
+        start) do_start ;;
+        stop) do_stop ;;
+        status) do_status ;;
+        log) do_log "$@" ;;
+        doctor) do_doctor ;;
+        install) do_install ;;
+        uninstall) do_uninstall ;;
+        *) echo "usage: $0 {start|stop|status|log [-f]|doctor|install|uninstall}"; exit 1 ;;
+    esac
+fi
