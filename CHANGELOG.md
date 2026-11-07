@@ -7,7 +7,7 @@ doc_type: changelog
 title: {zh: "fusion-event 变更日志", en: "fusion-event Changelog"}
 audience: engineer
 status: draft
-version: 0.1.0-rc.7
+version: 0.1.0-rc.8
 updated: 2026-11-07
 owner: "@dahai"
 source_of_truth:
@@ -16,12 +16,17 @@ source_of_truth:
 ---
 # Changelog
 
-## [Unreleased]
+## [0.1.0-rc.8] — 2026-11-07
 
-## [Unreleased]
+Patch release. Documentation system adoption — no functional code changes.
 
 ### Changed
 - Adopted the fusion docs-system v1.1 contract: added `docs/product-page.md`, `docs/get-started.md`, `docs/config-reference.md`, `docs/troubleshooting.md`, `docs/guides/`, `ci/validate_docs.py`, and `.github/workflows/docs.yml`; renamed `docs/api.md` to `docs/api-reference.md` (links updated); added contract frontmatter to all in-scope markdown. Grid classification: platform x service. No functional code changes.
+
+### Verification
+- `swift test`: 71 passing, 10 skipped, 0 failures
+- CI on `main` (merge of PR #15): green
+- Docs contract validation (`ci/validate_docs.py` via `docs.yml`): green
 
 ## [0.1.0-rc.7] — 2026-10-30
 
