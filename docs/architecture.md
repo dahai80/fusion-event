@@ -11,7 +11,7 @@ version: 0.1.0-rc.7
 updated: 2026-11-07
 owner: "@dahai"
 source_of_truth:
-  - docs/ARCHITECTURE.md
+  - docs/architecture.md
 ---
 # fusion-event — Architecture
 

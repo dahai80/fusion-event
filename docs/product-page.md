@@ -13,7 +13,7 @@ owner: "@dahai"
 source_of_truth:
   - README.md
   - CLAUDE.md
-  - docs/ARCHITECTURE.md
+  - docs/architecture.md
 ---
 
 # fusion-event 产品页 / Product Page

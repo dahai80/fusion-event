@@ -82,7 +82,7 @@ FSEvents / NSWorkspace / NWPathMonitor / Pasteboard
    → guard      → memory     → agent-studio
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
+See [docs/architecture.md](docs/architecture.md) for the full design.
 
 ## Integration
 
@@ -104,7 +104,7 @@ See [docs/integration.md](docs/integration.md) for the frozen RPC contracts and 
 | [docs/USAGE.md](docs/USAGE.md) | Customers | install, run, configure, troubleshoot |
 | [docs/INTEGRATION guide](docs/integration.md) | Integrators | downstream daemon contracts |
 | [docs/api-reference.md](docs/api-reference.md) | Integrators | full RPC API reference |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Developers | system design, pipeline, reliability |
+| [docs/architecture.md](docs/architecture.md) | Developers | system design, pipeline, reliability |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Contributors | build, test, lint, extend |
 | [docs/glob-spec.md](docs/glob-spec.md) | All | path-pattern glob rules |
 

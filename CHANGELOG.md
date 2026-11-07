@@ -62,7 +62,7 @@ Patch release. Public-release documentation (was unreleased on `main` since rc.4
 
 ### Changed
 - **Public release docs**: repository transitioned to public visibility. Added bilingual README (`README.md` English default + `README_CN.md` Chinese, cross-linked). Rewrote `README.md` from an internal milestone ledger into a public-facing quick-start + architecture + integration overview (detailed internals moved to `docs/`). Refreshed stale `CLAUDE.md` (was greenfield-era, contradicted rc.4) to the current implemented state with standalone (non-monorepo) context.
-- **Added docs**: `docs/USAGE.md` (customer install/run/configure/troubleshoot), `docs/ARCHITECTURE.md` (system design), `docs/DEVELOPMENT.md` (build/test/lint/extend/contribute).
+- **Added docs**: `docs/USAGE.md` (customer install/run/configure/troubleshoot), `docs/architecture.md` (system design), `docs/DEVELOPMENT.md` (build/test/lint/extend/contribute).
 - **PII scrub**: replaced `/Users/dahai/` example paths with `/Users/you/` in tracked docs/tests (real macOS username) ahead of the public flip. Working-tree only — git history retains the originals (username already in the GitHub handle).
 
 ### Fixed

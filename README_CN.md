@@ -79,7 +79,7 @@ FSEvents / NSWorkspace / NWPathMonitor / Pasteboard
    → guard      → memory     → agent-studio
 ```
 
-完整设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+完整设计见 [docs/architecture.md](docs/architecture.md)。
 
 ## 集成
 
@@ -101,7 +101,7 @@ FSEvents / NSWorkspace / NWPathMonitor / Pasteboard
 | [docs/USAGE.md](docs/USAGE.md) | 客户 | 安装、运行、配置、排障 |
 | [docs/integration.md](docs/integration.md) | 集成方 | 下游守护契约 |
 | [docs/api-reference.md](docs/api-reference.md) | 集成方 | 完整 RPC API 参考 |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 开发者 | 系统设计、流水线、可靠性 |
+| [docs/architecture.md](docs/architecture.md) | 开发者 | 系统设计、流水线、可靠性 |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 贡献者 | 构建、测试、lint、扩展 |
 | [docs/glob-spec.md](docs/glob-spec.md) | 全部 | path-pattern glob 规则 |
 

@@ -65,7 +65,7 @@ swift-format lint --recursive .     # swift-format 603.0.0, .swift-format config
 
 ## Project layout
 
-See [Architecture](ARCHITECTURE.md) → Source layout. Sources are under `Sources/fusion-event/`; tests under `Tests/fusion-eventTests/`.
+See [Architecture](architecture.md) → Source layout. Sources are under `Sources/fusion-event/`; tests under `Tests/fusion-eventTests/`.
 
 Code style: 4-space-multiple indentation, no docstrings, `os.Logger` for all daemon output, `actor`-isolated types for concurrency safety.
 
