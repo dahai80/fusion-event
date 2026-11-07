@@ -1,3 +1,18 @@
+---
+doc_id: fusion-event/release-signing-checklist
+product: fusion-event
+class: platform
+entry: service
+doc_type: guide
+title: {zh: "fusion-event 签名发布清单", en: "fusion-event Release Signing Checklist"}
+audience: engineer
+status: draft
+version: 0.1.0-rc.7
+updated: 2026-11-07
+owner: "@dahai"
+source_of_truth:
+  - docs/release-signing-checklist.md
+---
 # fusion-event 发布签名清单 (逐步)
 
 商用发布前置: codesign + notarize。当前 keychain 无 Developer ID 证书, 无 notarytool profile。

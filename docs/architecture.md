@@ -1,3 +1,18 @@
+---
+doc_id: fusion-event/architecture
+product: fusion-event
+class: platform
+entry: service
+doc_type: architecture
+title: {zh: "fusion-event 架构", en: "fusion-event Architecture"}
+audience: engineer
+status: draft
+version: 0.1.0-rc.7
+updated: 2026-11-07
+owner: "@dahai"
+source_of_truth:
+  - docs/architecture.md
+---
 # fusion-event — Architecture
 
 System design: event sources, pipeline, reliability, source layout.
@@ -85,7 +100,7 @@ Debounce state persists to SQLite WAL on every fire; on restart it rebuilds the 
 
 ## IPC
 
-JSON-RPC 2.0 over UDS (`sockPath`, default `/tmp/fusion-event.sock`), NDJSON-framed. Supports batch requests (array → array reply; notifications get no response, per spec). Socket is 0600 + peer-uid authenticated. Server pushes `event.notification` (raw events to subscribers) and `event.heartbeat`. See [API reference](api.md) for the full method set.
+JSON-RPC 2.0 over UDS (`sockPath`, default `/tmp/fusion-event.sock`), NDJSON-framed. Supports batch requests (array → array reply; notifications get no response, per spec). Socket is 0600 + peer-uid authenticated. Server pushes `event.notification` (raw events to subscribers) and `event.heartbeat`. See [API reference](api-reference.md) for the full method set.
 
 ## Source layout
 

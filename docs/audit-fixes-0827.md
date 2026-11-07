@@ -1,3 +1,18 @@
+---
+doc_id: fusion-event/audit-fixes-0827
+product: fusion-event
+class: platform
+entry: service
+doc_type: guide
+title: {zh: "fusion-event 审计修复记录", en: "fusion-event Audit Fixes 2026-08-27"}
+audience: engineer
+status: draft
+version: 0.1.0-rc.7
+updated: 2026-11-07
+owner: "@dahai"
+source_of_truth:
+  - docs/audit-fixes-0827.md
+---
 # fusion-event 审计修复落地记录 (2026-08-27)
 
 对应审计报告: `../audit/fusion-event-audit-0827.md`（上游 monorepo 审计目录，本文件仅记录修复，不改动审计原文）。

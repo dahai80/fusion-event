@@ -1,3 +1,18 @@
+---
+doc_id: fusion-event/claude
+product: fusion-event
+class: platform
+entry: service
+doc_type: readme
+title: {zh: "fusion-event 开发者指南", en: "fusion-event Developer Guide"}
+audience: engineer
+status: draft
+version: 0.1.0-rc.7
+updated: 2026-11-07
+owner: "@dahai"
+source_of_truth:
+  - CLAUDE.md
+---
 # CLAUDE.md
 
 This file gives guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -36,7 +51,7 @@ A macOS-native **reactive event daemon** — the Fusion ecosystem's perception l
 3. **`task.submit`** → fusion-agent-studio (direction B). `input.event` in **snake_case** (matches `trigger_input.py` frozen contract). No retry on failure.
 4. **`event.subscribe` / `event.notification`** push → consumers e.g. fusion-studio (direction B downstream — consumer adapts to fusion-event's frozen server contract). Push starts on connection accept, NOT on the subscribe line (subscribe RPC is just an ACK).
 
-See `docs/integration.md` for the frozen contracts, `docs/api.md` for the full RPC reference.
+See `docs/integration.md` for the frozen contracts, `docs/api-reference.md` for the full RPC reference.
 
 ## Build / Test / Lint
 

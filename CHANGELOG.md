@@ -1,6 +1,27 @@
+---
+doc_id: fusion-event/changelog
+product: fusion-event
+class: platform
+entry: service
+doc_type: changelog
+title: {zh: "fusion-event 变更日志", en: "fusion-event Changelog"}
+audience: engineer
+status: draft
+version: 0.1.0-rc.7
+updated: 2026-11-07
+owner: "@dahai"
+source_of_truth:
+  - CHANGELOG.md
+  - Package.swift
+---
 # Changelog
 
 ## [Unreleased]
+
+## [Unreleased]
+
+### Changed
+- Adopted the fusion docs-system v1.1 contract: added `docs/product-page.md`, `docs/get-started.md`, `docs/config-reference.md`, `docs/troubleshooting.md`, `docs/guides/`, `ci/validate_docs.py`, and `.github/workflows/docs.yml`; renamed `docs/api.md` to `docs/api-reference.md` (links updated); added contract frontmatter to all in-scope markdown. Grid classification: platform x service. No functional code changes.
 
 ## [0.1.0-rc.7] — 2026-10-30
 
@@ -41,7 +62,7 @@ Patch release. Public-release documentation (was unreleased on `main` since rc.4
 
 ### Changed
 - **Public release docs**: repository transitioned to public visibility. Added bilingual README (`README.md` English default + `README_CN.md` Chinese, cross-linked). Rewrote `README.md` from an internal milestone ledger into a public-facing quick-start + architecture + integration overview (detailed internals moved to `docs/`). Refreshed stale `CLAUDE.md` (was greenfield-era, contradicted rc.4) to the current implemented state with standalone (non-monorepo) context.
-- **Added docs**: `docs/USAGE.md` (customer install/run/configure/troubleshoot), `docs/ARCHITECTURE.md` (system design), `docs/DEVELOPMENT.md` (build/test/lint/extend/contribute).
+- **Added docs**: `docs/USAGE.md` (customer install/run/configure/troubleshoot), `docs/architecture.md` (system design), `docs/DEVELOPMENT.md` (build/test/lint/extend/contribute).
 - **PII scrub**: replaced `/Users/dahai/` example paths with `/Users/you/` in tracked docs/tests (real macOS username) ahead of the public flip. Working-tree only — git history retains the originals (username already in the GitHub handle).
 
 ### Fixed

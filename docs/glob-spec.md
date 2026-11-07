@@ -1,3 +1,18 @@
+---
+doc_id: fusion-event/glob-spec
+product: fusion-event
+class: platform
+entry: service
+doc_type: guide
+title: {zh: "fusion-event glob 规则", en: "fusion-event Glob Pattern Spec"}
+audience: engineer
+status: draft
+version: 0.1.0-rc.7
+updated: 2026-11-07
+owner: "@dahai"
+source_of_truth:
+  - docs/glob-spec.md
+---
 # Glob Pattern Spec (E1)
 
 `path_pattern` in `rule.add` is a glob matched against the event's `targetPath`.
