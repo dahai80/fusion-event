@@ -1,3 +1,18 @@
+---
+doc_id: fusion-event/readme
+product: fusion-event
+class: platform
+entry: service
+doc_type: readme
+title: {zh: "fusion-event 说明", en: "fusion-event README"}
+audience: engineer
+status: draft
+version: 0.1.0-rc.7
+updated: 2026-11-07
+owner: "@dahai"
+source_of_truth:
+  - README.md
+---
 # fusion-event
 
 > **Languages**: [English](README.md) | [中文](README_CN.md)
@@ -80,7 +95,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 | `task.submit` | outbound | fusion-agent-studio | trigger handoff (snake_case `input.event`) |
 | `event.subscribe` / `event.notification` | inbound (server push) | consumers (e.g. fusion-studio) | NDJSON push stream |
 
-See [docs/integration.md](docs/integration.md) for the frozen RPC contracts and [docs/api.md](docs/api.md) for the full inbound RPC reference.
+See [docs/integration.md](docs/integration.md) for the frozen RPC contracts and [docs/api-reference.md](docs/api-reference.md) for the full inbound RPC reference.
 
 ## Documentation
 
@@ -88,7 +103,7 @@ See [docs/integration.md](docs/integration.md) for the frozen RPC contracts and 
 |-----|----------|---------|
 | [docs/USAGE.md](docs/USAGE.md) | Customers | install, run, configure, troubleshoot |
 | [docs/INTEGRATION guide](docs/integration.md) | Integrators | downstream daemon contracts |
-| [docs/api.md](docs/api.md) | Integrators | full RPC API reference |
+| [docs/api-reference.md](docs/api-reference.md) | Integrators | full RPC API reference |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Developers | system design, pipeline, reliability |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Contributors | build, test, lint, extend |
 | [docs/glob-spec.md](docs/glob-spec.md) | All | path-pattern glob rules |

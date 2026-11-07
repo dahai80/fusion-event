@@ -1,3 +1,18 @@
+---
+doc_id: fusion-event/api-reference
+product: fusion-event
+class: platform
+entry: service
+doc_type: api-reference
+title: {zh: "fusion-event API 参考", en: "fusion-event API Reference"}
+audience: engineer
+status: draft
+version: 0.1.0-rc.7
+updated: 2026-11-07
+owner: "@dahai"
+source_of_truth:
+  - docs/api-reference.md
+---
 # fusion-event — API Reference
 
 JSON-RPC 2.0 over Unix Domain Socket (UDS), NDJSON-framed (one message per `\n`).

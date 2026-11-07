@@ -1,6 +1,27 @@
+---
+doc_id: fusion-event/changelog
+product: fusion-event
+class: platform
+entry: service
+doc_type: changelog
+title: {zh: "fusion-event 变更日志", en: "fusion-event Changelog"}
+audience: engineer
+status: draft
+version: 0.1.0-rc.7
+updated: 2026-11-07
+owner: "@dahai"
+source_of_truth:
+  - CHANGELOG.md
+  - Package.swift
+---
 # Changelog
 
 ## [Unreleased]
+
+## [Unreleased]
+
+### Changed
+- Adopted the fusion docs-system v1.1 contract: added `docs/product-page.md`, `docs/get-started.md`, `docs/config-reference.md`, `docs/troubleshooting.md`, `docs/guides/`, `ci/validate_docs.py`, and `.github/workflows/docs.yml`; renamed `docs/api.md` to `docs/api-reference.md` (links updated); added contract frontmatter to all in-scope markdown. Grid classification: platform x service. No functional code changes.
 
 ## [0.1.0-rc.7] — 2026-10-30
 

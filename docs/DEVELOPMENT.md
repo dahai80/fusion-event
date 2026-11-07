@@ -1,3 +1,18 @@
+---
+doc_id: fusion-event/development
+product: fusion-event
+class: platform
+entry: service
+doc_type: guide
+title: {zh: "fusion-event 开发指南", en: "fusion-event Development Guide"}
+audience: engineer
+status: draft
+version: 0.1.0-rc.7
+updated: 2026-11-07
+owner: "@dahai"
+source_of_truth:
+  - docs/DEVELOPMENT.md
+---
 # fusion-event — Developer Guide
 
 Build, test, lint, contribute, and extend the daemon.

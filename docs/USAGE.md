@@ -1,3 +1,18 @@
+---
+doc_id: fusion-event/usage
+product: fusion-event
+class: platform
+entry: service
+doc_type: guide
+title: {zh: "fusion-event 使用指南", en: "fusion-event Usage Guide"}
+audience: engineer
+status: draft
+version: 0.1.0-rc.7
+updated: 2026-11-07
+owner: "@dahai"
+source_of_truth:
+  - docs/USAGE.md
+---
 # fusion-event — Usage Guide
 
 Customer-facing guide: install, run, configure, and troubleshoot the daemon.
@@ -104,7 +119,7 @@ Rule fields:
 | `throttle_ms` | no | at most one fire per window (default 0) |
 | `require_guard` | no | fail-closed if fusion-guard is down (default false) |
 
-See [Glob spec](glob-spec.md) for path-pattern details, [API reference](api.md) for the full RPC set.
+See [Glob spec](glob-spec.md) for path-pattern details, [API reference](api-reference.md) for the full RPC set.
 
 ## Health + metrics
 
@@ -124,7 +139,7 @@ PY
 
 `event.health` returns `ok`, `version`, `uptime_sec`, per-source `events_total`/`errors`, and trigger counters (`submitted`/`blocked`/`failed`). `./start.sh doctor` runs this and reports outbox backlog (warns above 50).
 
-In-process metrics (latency P50/P99, backpressure duration, drop counts) are available via the `event.metrics` RPC — see [API reference](api.md).
+In-process metrics (latency P50/P99, backpressure duration, drop counts) are available via the `event.metrics` RPC — see [API reference](api-reference.md).
 
 ## Troubleshooting
 

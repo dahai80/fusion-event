@@ -1,3 +1,18 @@
+---
+doc_id: fusion-event/integration
+product: fusion-event
+class: platform
+entry: service
+doc_type: guide
+title: {zh: "fusion-event 集成契约", en: "fusion-event Integration Contracts"}
+audience: engineer
+status: draft
+version: 0.1.0-rc.7
+updated: 2026-11-07
+owner: "@dahai"
+source_of_truth:
+  - docs/integration.md
+---
 # fusion-event — Integration Guide
 
 How downstream Fusion daemons consume `fusion-event`. This is the ecosystem contract

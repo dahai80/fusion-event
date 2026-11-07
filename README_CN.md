@@ -1,3 +1,18 @@
+---
+doc_id: fusion-event/readme-cn
+product: fusion-event
+class: platform
+entry: service
+doc_type: readme
+title: {zh: "fusion-event 中文说明", en: "fusion-event README (Chinese)"}
+audience: engineer
+status: draft
+version: 0.1.0-rc.7
+updated: 2026-11-07
+owner: "@dahai"
+source_of_truth:
+  - README_CN.md
+---
 > **语言**: [English](README.md) | [中文](README_CN.md)
 
 # fusion-event
@@ -77,7 +92,7 @@ FSEvents / NSWorkspace / NWPathMonitor / Pasteboard
 | `task.submit` | 出站 | fusion-agent-studio | 触发交接(snake_case `input.event`) |
 | `event.subscribe` / `event.notification` | 入站(服务端推) | 消费方(如 fusion-studio) | NDJSON 推流 |
 
-冻结的 RPC 契约见 [docs/integration.md](docs/integration.md),完整入站 RPC 参考见 [docs/api.md](docs/api.md)。
+冻结的 RPC 契约见 [docs/integration.md](docs/integration.md),完整入站 RPC 参考见 [docs/api-reference.md](docs/api-reference.md)。
 
 ## 文档
 
@@ -85,7 +100,7 @@ FSEvents / NSWorkspace / NWPathMonitor / Pasteboard
 |------|------|------|
 | [docs/USAGE.md](docs/USAGE.md) | 客户 | 安装、运行、配置、排障 |
 | [docs/integration.md](docs/integration.md) | 集成方 | 下游守护契约 |
-| [docs/api.md](docs/api.md) | 集成方 | 完整 RPC API 参考 |
+| [docs/api-reference.md](docs/api-reference.md) | 集成方 | 完整 RPC API 参考 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 开发者 | 系统设计、流水线、可靠性 |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 贡献者 | 构建、测试、lint、扩展 |
 | [docs/glob-spec.md](docs/glob-spec.md) | 全部 | path-pattern glob 规则 |
