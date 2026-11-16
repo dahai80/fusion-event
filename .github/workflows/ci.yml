@@ -3,8 +3,20 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+# Cancel superseded runs on the same ref (issue #16): docs-only or fixup
+# pushes to a PR branch must not queue behind full test runs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
@@ -14,6 +26,19 @@ jobs:
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer || true
+
+      # SwiftPM cache (issue #16). Keyed on Package.swift — this package has no
+      # external dependencies (no Package.resolved), so the win is the module
+      # cache and manifest parse, not dependency downloads.
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
 
       - name: Swift version
         run: swift --version
