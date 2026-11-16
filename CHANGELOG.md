@@ -7,14 +7,32 @@ doc_type: changelog
 title: {zh: "fusion-event 变更日志", en: "fusion-event Changelog"}
 audience: engineer
 status: draft
-version: 0.1.0-rc.8
-updated: 2026-11-07
+version: 0.1.0-rc.9
+updated: 2026-11-16
 owner: "@dahai"
 source_of_truth:
   - CHANGELOG.md
   - Package.swift
 ---
 # Changelog
+
+## [0.1.0-rc.9] — 2026-11-16
+
+Patch release. CI efficiency retrofit per the fusion#2 checklist (issue #16, PR #17) — no product code changes.
+
+### Changed
+- **CI concurrency cancel**: `concurrency.group = ci-${{ github.ref }}` with `cancel-in-progress: true` — superseded runs on the same branch are cancelled instead of queueing.
+- **SwiftPM cache**: `actions/cache@v4` over `~/Library/Caches/org.swift.swiftpm` + `.build`, keyed on `hashFiles('Package.swift')`. The package has no external dependencies (no `Package.resolved`), so the win is the module cache and manifest parse, not dependency downloads.
+- **`paths-ignore`** for `**.md` and `docs/**` on push and pull_request — docs-only changes skip the test jobs (the `docs` workflow keeps its own PR-only path filter).
+
+### Checklist items assessed, not needed
+- Test sharding via matrix: suite executes in ~12s (71 tests), far below the ~5 min threshold.
+- Tiered gate / nightly full suite: full CI is ~2 min warm, nothing to split.
+
+### Verification
+- `swift test`: 71 passing, 10 skipped, 0 failures
+- CI green on PR #17 (cold-cache run 15m41s incl. runner queue) and on `main` after merge
+- Before/after run minutes recorded in PR #17 description + follow-up comment
 
 ## [0.1.0-rc.8] — 2026-11-07
 
